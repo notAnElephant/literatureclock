@@ -55,9 +55,26 @@ USER_AGENT = (
 
 # Authors to fetch
 AUTHORS = [
-    'Jókai Mór',
-    # 'Mikszáth Kálmán',
-    # 'Móricz Zsigmond',
+    "Jókai Mór",
+    "Mikszáth Kálmán",
+    "Móricz Zsigmond",
+    "Karinthy Frigyes",
+    "Kosztolányi Dezső",
+    "Krúdy Gyula",
+    "Szabó Magda",
+    "Ottlik Géza",
+    "Déry Tibor",
+    "Németh László",
+    "Kertész Imre",
+    "Esterházy Péter",
+    "Mándy Iván",
+    "Csáth Géza",
+    "Lengyel Péter",
+    "Spiró György",
+    "Háy János",
+    "Grecsó Krisztián",
+    "Závada Pál",
+    "Dragomán György",
 ]
 
 # Search endpoints to try (MEK sometimes tweaks paths).
@@ -163,27 +180,31 @@ def ensure_trailing_slash(u: str) -> str:
 
 
 # 2) Extract from the anchor’s href, not the inner text
-def find_item_urls(html: str, base_url: str) -> List[str]:
+def find_item_urls(html: str, base_url: str) -> List[Tuple[str, Optional[str]]]:
     soup = BeautifulSoup(html, 'html.parser')
-    urls: List[str] = []
+    items: List[Tuple[str, Optional[str]]] = []
 
     # Only anchors with class=itemlink
     for a in soup.select('a.itemlink[href]'):
         href = a.get('href', '').strip()
         if not href:
             continue
-        print(f"[find_item_urls] Found href: {href}")
         abs_url = absolutise(base_url, href)
         # Keep only MEK item-page roots; normalize trailing slash
         if ITEM_URL_RE.match(abs_url):
-            urls.append(ensure_trailing_slash(abs_url))
+            url = ensure_trailing_slash(abs_url)
+            # Extract dctitle text if present
+            dctitle_div = a.find('div', class_='dctitle')
+            title = dctitle_div.get_text(strip=True) if dctitle_div else None
+            print(f"[find_item_urls] Found href: {href}, title: {title}")
+            items.append((url, title))
 
     # de-dup, keep order
     seen = set()
     uniq = []
-    for u in urls:
+    for u, t in items:
         if u not in seen:
-            uniq.append(u)
+            uniq.append((u, t))
             seen.add(u)
     return uniq
 
@@ -223,7 +244,7 @@ def extract_download_links(item_html: str, item_url: str) -> List[str]:
 
 # ---------------- search ----------------
 
-def search_author(author: str) -> List[str]:
+def search_author(author: str) -> List[Tuple[str, Optional[str]]]:
     """Try multiple endpoints to find item pages for an author."""
     print(f"[search_author] Searching for author: {author}")
     for idx, endpoint in enumerate(SEARCH_ENDPOINTS):
@@ -308,8 +329,8 @@ def _first_p_text(html: str) -> Optional[str]:
     return txt or None
 
 
-def download_best_formats(item_url: str, author_dir: Path, robots: RobotsRules) -> dict:
-    """Download only the main content file (<id>.<ext>) and name it from the first <p> text."""
+def download_best_formats(item_url: str, title: Optional[str], author_dir: Path, robots: RobotsRules) -> dict:
+    """Download only the main content file (<id>.<ext>) and name it from the dctitle if available, else from the first <p> text."""
     page_html = fetch_text(item_url)
     if not page_html:
         return {"item": item_url, "status": "item_page_failed"}
@@ -321,15 +342,18 @@ def download_best_formats(item_url: str, author_dir: Path, robots: RobotsRules) 
     if not is_allowed_by_robots(main_url, robots):
         return {"item": item_url, "status": "disallowed_by_robots", "url": main_url}
 
-    # Determine filename prefix from first <p> of the HTML rendition.
-    # If main_url is not HTML, try to fetch the HTML/HTM variant just for naming.
+    # Determine filename prefix: prefer dctitle, else first <p>, else fallback
     name_prefix: Optional[str] = None
     main_ext = Path(urlparse(main_url).path).suffix.lower()
 
-    if main_ext in (".html", ".htm"):
+    if title:
+        name_prefix = title
+        print(f"[download_best_formats] Using dctitle for filename: {title}")
+    elif main_ext in (".html", ".htm"):
         main_html = fetch_text(main_url)
         if main_html:
             name_prefix = _first_p_text(main_html)
+            print(f"[download_best_formats] Using <p> text for filename: {name_prefix}")
     else:
         # Try to locate a sibling HTML variant for naming: .../<id>.html or .htm
         try:
@@ -343,6 +367,7 @@ def download_best_formats(item_url: str, author_dir: Path, robots: RobotsRules) 
                     if html_text:
                         name_prefix = _first_p_text(html_text)
                         if name_prefix:
+                            print(f"[download_best_formats] Using sibling HTML <p> text for filename: {name_prefix}")
                             break
         except Exception:
             pass
@@ -350,6 +375,7 @@ def download_best_formats(item_url: str, author_dir: Path, robots: RobotsRules) 
     # Finalise filename
     if not name_prefix:
         name_prefix = guess_title_from_item(item_url)  # fallback
+        print(f"[download_best_formats] Using fallback for filename: {name_prefix}")
     fname = safe_filename(name_prefix) + main_ext
     out_path = author_dir / fname
 
@@ -374,7 +400,7 @@ def process_author(author: str, robots: RobotsRules) -> dict:
 
     reports = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = [ex.submit(download_best_formats, u, author_dir, robots) for u in items]
+        futures = [ex.submit(download_best_formats, u, t, author_dir, robots) for u, t in items]
         for fut in as_completed(futures):
             reports.append(fut.result())
 

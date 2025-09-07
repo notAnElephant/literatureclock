@@ -1,0 +1,134 @@
+{
+  "locale": "hu",
+  "version": 1,
+  "strict": true,
+  "notes": [
+    "Strict mode: emit ONLY exact minutes. Dayparts are used ONLY to disambiguate 12h, never emitted alone.",
+    "Order matters; earlier rules win ties."
+  ],
+  "rules": [
+    {
+      "id": "clock_hh_mm_colon",
+      "description": "24h with colon (07:05, 19:05).",
+      "type": "regex",
+      "pattern": "(?<!\\d)\\b([01]?\\d|2[0-3]):([0-5]\\d)\\b(?!\\d)",
+      "semantics": "clock_hh_mm"
+    },
+    {
+      "id": "clock_hh_mm_dot",
+      "description": "24h with dot (7.05, 07.05, 19.05).",
+      "type": "regex",
+      "pattern": "(?<!\\d)\\b([01]?\\d|2[0-3])\\.([0-5]\\d)\\b(?!\\d)",
+      "semantics": "clock_hh_mm"
+    },
+    {
+      "id": "x_ora_y_perc_digits",
+      "description": "X óra Y perc / perckor (24h digits).",
+      "type": "regex",
+      "pattern": "\\b([01]?\\d|2[0-3])\\s*óra\\s*([0-5]?\\d)\\s*perc(?:kor|ben)?\\b",
+      "semantics": "clock_hh_mm"
+    },
+    {
+      "id": "x_ora_y_perc_words",
+      "description": "X óra Y perc (X and/or Y in words).",
+      "type": "regex",
+      "pattern": "\\b(egy|kettő|két|három|négy|öt|hat|hét|nyolc|kilenc|tíz|tizenegy|tizenkettő|tizen\\w+|huszon\\w+|húsz|harminc\\w*|negyven\\w*|ötven\\w*)\\s*óra\\s*(?:([0-5]?\\d)|([a-záéíóöőúüű\\-]+))\\s*perc(?:kor|ben)?\\b",
+      "semantics": "clock_words_maybe_digits"
+    },
+    {
+      "id": "oclock_strict_24h",
+      "description": "X óra / X-kor / X órakor (digits, 0–23 only).",
+      "type": "regex",
+      "pattern": "\\b([01]?\\d|2[0-3])\\s*(?:óra|órakor|-?kor)\\b",
+      "semantics": "oclock_h"
+    },
+    {
+      "id": "relative_fel",
+      "description": "fél N → (N-1):30",
+      "type": "regex",
+      "pattern": "\\bfél\\s*([01]?\\d|2[0-3]|tizenegy|tizenkettő|egy|kettő|két|három|négy|öt|hat|hét|nyolc|kilenc|tíz)\\b",
+      "semantics": "half_next_hour"
+    },
+    {
+      "id": "relative_negyed",
+      "description": "negyed N → (N-1):15",
+      "type": "regex",
+      "pattern": "\\bnegyed\\s*([01]?\\d|2[0-3]|tizenegy|tizenkettő|egy|kettő|két|három|négy|öt|hat|hét|nyolc|kilenc|tíz)\\b",
+      "semantics": "quarter_next_hour"
+    },
+    {
+      "id": "relative_haromnegyed",
+      "description": "háromnegyed N → (N-1):45",
+      "type": "regex",
+      "pattern": "\\bháromnegyed\\s*([01]?\\d|2[0-3]|tizenegy|tizenkettő|egy|kettő|két|három|négy|öt|hat|hét|nyolc|kilenc|tíz)\\b",
+      "semantics": "threequarter_next_hour"
+    },
+    {
+      "id": "after_minutes",
+      "description": "Y perc(cel) X óra után / X óra után Y perc(cel) → X:Y",
+      "type": "regex",
+      "pattern": "\\b(?:(?:([0-5]?\\d)|([a-záéíóöőúüű\\-]+))\\s*percc?el\\s*(?:[a ]*)?([01]?\\d|2[0-3])\\s*óra\\s*után|([01]?\\d|2[0-3])\\s*óra\\s*után\\s*(?:([0-5]?\\d)|([a-záéíóöőúüű\\-]+))\\s*percc?el)\\b",
+      "semantics": "after_minutes"
+    },
+    {
+      "id": "before_minutes",
+      "description": "Y perc(cel) X óra előtt / X óra előtt Y perc(cel) → (X-1):(60-Y)",
+      "type": "regex",
+      "pattern": "\\b(?:(?:([0-5]?\\d)|([a-záéíóöőúüű\\-]+))\\s*percc?el\\s*(?:[a ]*)?([01]?\\d|2[0-3])\\s*óra\\s*előtt|([01]?\\d|2[0-3])\\s*óra\\s*előtt\\s*(?:([0-5]?\\d)|([a-záéíóöőúüű\\-]+))\\s*percc?el)\\b",
+      "semantics": "before_minutes"
+    },
+    {
+      "id": "oclock_words_with_daypart",
+      "description": "word + óra/órakor with daypart bias (we keep ambiguous if no daypart).",
+      "type": "regex",
+      "pattern": "\\b(egy|kettő|két|három|négy|öt|hat|hét|nyolc|kilenc|tíz|tizenegy|tizenkettő)\\s*(?:óra|órakor|-?kor)\\b",
+      "semantics": "oclock_word_needs_daypart"
+    },
+    {
+      "id": "bare_daypart",
+      "description": "Dayparts exist but NEVER emitted in strict mode; used only to bias 12h resolution.",
+      "type": "regex",
+      "pattern": "\\b(hajnalban|hajnal|reggel|délelőtt|dél|délután|este|éjjel|éjfél|de\\.|du\\.)\\b",
+      "semantics": "daypart_for_bias"
+    }
+  ],
+  "word2hour": {
+    "egy": 1,
+    "kettő": 2,
+    "két": 2,
+    "három": 3,
+    "négy": 4,
+    "öt": 5,
+    "hat": 6,
+    "hét": 7,
+    "nyolc": 8,
+    "kilenc": 9,
+    "tíz": 10,
+    "tizenegy": 11,
+    "tizenkettő": 12
+  },
+  "number_words": {
+    "0": ["nulla","zéró"],
+    "1": ["egy"],
+    "2": ["kettő","két"],
+    "3": ["három"],
+    "4": ["négy"],
+    "5": ["öt"],
+    "6": ["hat"],
+    "7": ["hét"],
+    "8": ["nyolc"],
+    "9": ["kilenc"],
+    "10": ["tíz"],
+    "11": ["tizenegy"],
+    "12": ["tizenkettő"],
+    "13_19_prefix": ["tizen"],
+    "20_exact": ["húsz"],
+    "20s_prefix": ["huszon"],
+    "30_exact": ["harminc"],
+    "30s_prefix": ["harminc"],
+    "40_exact": ["negyven"],
+    "40s_prefix": ["negyven"],
+    "50_exact": ["ötven"],
+    "50s_prefix": ["ötven"]
+  }
+}
