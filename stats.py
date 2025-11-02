@@ -1,4 +1,6 @@
+from pathlib import Path
 import json
+
 
 def get_hits_stats(jsonl_path='hits.jsonl'):
     """
@@ -30,7 +32,38 @@ def get_hits_stats(jsonl_path='hits.jsonl'):
     }
 
 
+def load_stats(summary_path: str = "mek_downloads/_summary.json") -> list:
+    """Load and return the stats from _summary.json."""
+    path = Path(summary_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Summary file not found: {summary_path}")
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def print_summary(summary_path: str = 'mek_downloads/_summary.json') -> None:
+    """Load and display summary (all_available_exts + counts + percentages) in table form."""
+    data = load_stats(summary_path)
+    summary = data.get('summary', {})
+    exts = summary.get('all_available_exts', [])
+    counts = summary.get('all_available_exts_count', {})
+
+    total = sum(counts.values()) or 1  # avoid division by zero
+
+    print('Summary:')
+    print('-' * 50)
+    print(f"{'Extension':<10} | {'Count':>6}")
+    print('-' * 50)
+    for ext in sorted(exts, key=lambda e: counts.get(e, 0), reverse=True):
+        count = counts.get(ext, 0)
+        print(f"{ext:<10} | {count:>6}")
+    print('-' * 50)
+    print(f"Total extensions: {len(exts)}   Total files: {total}")
+
+
 if __name__ == '__main__':
+    print_summary()
+
     stats = get_hits_stats()
     for stat in stats:
         print(stat, stats[stat])

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-# --- put near the top ---
-import functools
+import argparse
 import json
 import os
 import re
@@ -15,36 +14,14 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-PROFILE = os.getenv("MEK_PROFILE", "1") == "1"
 SLOW_MS = int(os.getenv("MEK_SLOW_MS", "800"))  # log ops slower than this
-
-
-def timeit(label):
-    def deco(fn):
-        if not PROFILE:
-            return fn
-
-        @functools.wraps(fn)
-        def wrapped(*args, **kwargs):
-            t0 = time.monotonic()
-            try:
-                return fn(*args, **kwargs)
-            finally:
-                dt = (time.monotonic() - t0) * 1000
-                if dt >= SLOW_MS:
-                    print(f"[SLOW] {label} took {dt:.0f} ms")
-
-        return wrapped
-
-    return deco
-
 
 # ---------------- Config ----------------
 
 OUT_DIR = Path('mek_downloads')
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Keep this modest; you can raise to 6–8 if needed
+# Keep this modest; can raise to 6–8 if needed
 MAX_WORKERS = 4
 REQUEST_DELAY_SEC = 0.7  # extra politeness between requests
 
@@ -55,6 +32,7 @@ USER_AGENT = (
 
 # Authors to fetch
 AUTHORS = [
+    # Hungarian authors
     "Jókai Mór",
     "Mikszáth Kálmán",
     "Móricz Zsigmond",
@@ -75,6 +53,20 @@ AUTHORS = [
     "Grecsó Krisztián",
     "Závada Pál",
     "Dragomán György",
+
+    "Kafka Margit",
+    "Mándy Iván",
+    "Nemes-Nagy Ágnes",
+    "Weöres Sándor",
+    "Örkény István",
+    "Lázár Ervin",
+    "Szerb Antal",
+    "Rakovszky Zsuzsa",
+    "Szabó T. Anna",
+    "Márai Sándor"
+
+    # Foreign authors
+    # TODO: add authors here
 ]
 
 # Search endpoints to try (MEK sometimes tweaks paths).
@@ -290,34 +282,55 @@ def guess_title_from_item(item_url: str) -> str:
         return 'untitled'
 
 
-def _get_main_content_link(item_html: str, item_url: str) -> Optional[str]:
+def _get_main_content_link(item_html: str, item_url: str) -> Tuple[Optional[str], List[str], List[str]]:
     soup = BeautifulSoup(item_html, "html.parser")
-    # Extract the numeric item id from the URL path (e.g., ".../07324/").
     try:
         parts = [p for p in Path(urlparse(item_url).path).parts if p]
         item_id = parts[-1]  # "07324"
     except Exception:
-        return None
+        return None, [], []
 
-    # Collect anchors that point to "<item_id>.<ext>" where ext in EXT_PRIORITY
-    candidates: List[Tuple[int, str]] = []
-    for a in soup.select('a[href]'):
-        href = a.get("href", "").strip()
+    # TODO a 2. "megtekintheto verziok" reszbol is szedjuk ki a linkeket. Pl.: https://mek.oszk.hu/05100/05177/
+    found_exts: set = set()
+    all_exts: list = []
+    main_candidate: Optional[Tuple[int, str]] = None
+    # TODO return htm(l)s embedded in html(l)s as well. There might not be a single link for them,
+    #  but multiple ones, per chapter, though
+    for a in soup.select('a.cssfile[href]'):
+        href = a.get('href', '').strip()
         if not href:
+            print("[_get_main_content_link] Skipping empty href")
             continue
+
         abs_url = absolutise(item_url, href)
-        lower = abs_url.lower()
-        for idx, ext in enumerate(EXT_PRIORITY):
-            if lower.endswith(f"/{item_id}{ext}") or lower.endswith(f"{item_id}{ext}"):
-                candidates.append((idx, abs_url))
-                break
+        classes = a.get('class', '')
+        ext = None
 
-    if not candidates:
-        return None
+        # Use second class as extension if present
+        if len(classes) > 1:
+            ext = f'.{classes[1]}'
+        else:
+            # fallback to regex detection from href
+            lower = abs_url.lower()
+            match = re.search(rf"(?:/|^){re.escape(item_id)}(\.[a-z0-9]+)$", lower)
+            if match:
+                ext = match.group(1)
 
-    # Choose by extension priority (HTML/HTM > RTF > PDF)
-    candidates.sort(key=lambda t: (t[0], t[1].lower()))
-    return candidates[0][1]
+        if ext:
+            found_exts.add(ext)
+            all_exts.append(ext)
+            if ext in EXT_PRIORITY:
+                idx = EXT_PRIORITY.index(ext)
+                if (main_candidate is None) or (idx < main_candidate[0]):
+                    main_candidate = (idx, abs_url)
+    # Sort all found extensions by EXT_PRIORITY, then alphabetically
+    found_exts_sorted = sorted(
+        found_exts,
+        key=lambda ext: (0, EXT_PRIORITY.index(ext)) if ext in EXT_PRIORITY else (1, ext)
+    )
+    if not main_candidate:
+        return None, found_exts_sorted, all_exts
+    return main_candidate[1], found_exts_sorted, all_exts
 
 
 def _first_p_text(html: str) -> Optional[str]:
@@ -325,22 +338,26 @@ def _first_p_text(html: str) -> Optional[str]:
     p = soup.find("p")
     if not p:
         return None
-    txt = p.get_text(separator=" ", strip=True)
+    txt = p.get_text(strip=True)
     return txt or None
 
 
-def download_best_formats(item_url: str, title: Optional[str], author_dir: Path, robots: RobotsRules) -> dict:
-    """Download only the main content file (<id>.<ext>) and name it from the dctitle if available, else from the first <p> text."""
+def download_best_formats(item_url: str, title: Optional[str], author_dir: Path, robots: RobotsRules,
+                          list_only: bool) -> dict:
+    """Download only the main content file (<id>.<ext>) and name it from the dctitle if available, else from the first <p> text. If list_only, just list metadata."""
     page_html = fetch_text(item_url)
     if not page_html:
         return {"item": item_url, "status": "item_page_failed"}
 
-    main_url = _get_main_content_link(page_html, item_url)
+    #. all exts full is not used
+    main_url, available_exts, all_exts_full = _get_main_content_link(page_html, item_url)
     if not main_url:
-        return {"item": item_url, "status": "main_content_not_found"}
+        print(
+            f"[download_best_formats] No main content link found for item: {item_url}. Available extensions: {available_exts}")
+        return {"item": item_url, "status": "main_content_not_found", "available_exts": available_exts}
 
     if not is_allowed_by_robots(main_url, robots):
-        return {"item": item_url, "status": "disallowed_by_robots", "url": main_url}
+        return {"item": item_url, "status": "disallowed_by_robots", "url": main_url, "available_exts": available_exts}
 
     # Determine filename prefix: prefer dctitle, else first <p>, else fallback
     name_prefix: Optional[str] = None
@@ -355,7 +372,6 @@ def download_best_formats(item_url: str, title: Optional[str], author_dir: Path,
             name_prefix = _first_p_text(main_html)
             print(f"[download_best_formats] Using <p> text for filename: {name_prefix}")
     else:
-        # Try to locate a sibling HTML variant for naming: .../<id>.html or .htm
         try:
             parts = [p for p in Path(urlparse(item_url).path).parts if p]
             item_id = parts[-1]
@@ -370,58 +386,113 @@ def download_best_formats(item_url: str, title: Optional[str], author_dir: Path,
                             print(f"[download_best_formats] Using sibling HTML <p> text for filename: {name_prefix}")
                             break
         except Exception:
+            print("[download_best_formats] Error while trying to extract sibling HTML <p> text")
             pass
 
-    # Finalise filename
     if not name_prefix:
         name_prefix = guess_title_from_item(item_url)  # fallback
         print(f"[download_best_formats] Using fallback for filename: {name_prefix}")
     fname = safe_filename(name_prefix) + main_ext
     out_path = author_dir / fname
 
+    if list_only:
+        # Just list, do not download or write files
+        print(f"[download_best_formats] List-only mode: {item_url} would be saved as {out_path}")
+        return {"item": item_url, "status": "listed", "files": [str(out_path)], "url": main_url,
+                "available_exts": available_exts}
+
     if out_path.exists():
-        return {"item": item_url, "status": "ok", "files": [str(out_path)], "url": main_url}
+        return {"item": item_url, "status": "ok", "files": [str(out_path)], "url": main_url,
+                "available_exts": available_exts}
 
     content = fetch_binary(main_url)
     if not content:
-        return {"item": item_url, "status": "download_failed", "url": main_url}
+        return {"item": item_url, "status": "download_failed", "url": main_url, "available_exts": available_exts}
 
     out_path.write_bytes(content)
-    return {"item": item_url, "status": "ok", "files": [str(out_path)], "url": main_url}
+    return {"item": item_url, "status": "ok", "files": [str(out_path)], "url": main_url,
+            "available_exts": available_exts}
 
 
-def process_author(author: str, robots: RobotsRules) -> dict:
+def process_author(author: str, robots: RobotsRules, list_only: bool) -> dict:
     print(f'\n=== Author: {author} ===')
     items = search_author(author)
-    print(f'Found {len(items)} candidate item pages.')
 
     author_dir = OUT_DIR / safe_filename(author)
     author_dir.mkdir(parents=True, exist_ok=True)
 
     reports = []
+    all_exts = set()
+    all_exts_full = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = [ex.submit(download_best_formats, u, t, author_dir, robots) for u, t in items]
+        futures = [ex.submit(download_best_formats, u, t, author_dir, robots, list_only) for u, t in items]
         for fut in as_completed(futures):
-            reports.append(fut.result())
+            result = fut.result()
+            reports.append(result)
+            for ext in result.get('available_exts', []):
+                all_exts.add(ext)
+            all_exts_full.extend(result.get('all_exts_full', []))
 
     ok = sum(1 for r in reports if r.get('status') == 'ok')
     print(f'Done: {ok}/{len(items)} items saved (see "{author_dir}").')
-    return {'author': author, 'items': len(items), 'saved': ok, 'reports': reports}
+
+    # Count all file types in the author's directory
+    filetype_counts = {}
+    if not list_only:
+        for f in author_dir.iterdir():
+            if f.is_file():
+                ext = f.suffix.lower() or 'NOEXT'
+                filetype_counts[ext] = filetype_counts.get(ext, 0) + 1
+
+    return {
+        'author': author,
+        'items': len(items),
+        'saved': ok,
+        'reports': reports,
+        'filetype_counts': filetype_counts,
+        'available_exts': sorted(all_exts, key=lambda x: EXT_PRIORITY.index(x) if x in EXT_PRIORITY else 99),
+        'all_exts_full': all_exts_full
+    }
 
 
-def main() -> None:
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--list-only', action='store_true',
+                        help='Only list available files and extensions, do not download')
+    args = parser.parse_args()
+    list_only = args.list_only
+
+    if list_only:
+        print('=== List-only mode ===')
+    else:
+        print('=== Download mode ===')
+
     robots = fetch_robots()
     if robots.disallow:
         print('Robots.txt disallow prefixes:', robots.disallow[:8], '...')
 
     all_reports = []
+    all_exts = set()
+    all_exts_count = {}
     for author in AUTHORS:
-        rep = process_author(author, robots)
+        rep = process_author(author, robots, list_only)
         all_reports.append(rep)
+        for ext in rep.get('available_exts', []):
+            all_exts.add(ext)
+        for ext in rep.get('all_exts_full', []):
+            all_exts_count[ext] = all_exts_count.get(ext, 0) + 1
 
     # Write a small JSON summary
+    summary = {
+        'authors': all_reports,
+        'summary': {
+            'all_available_exts': sorted(all_exts, key=lambda x: EXT_PRIORITY.index(x) if x in EXT_PRIORITY else 99),
+            'all_available_exts_count': dict(sorted(all_exts_count.items(), key=lambda x: (
+                EXT_PRIORITY.index(x[0]) if x[0] in EXT_PRIORITY else 99, x[0])))
+        }
+    }
     (OUT_DIR / '_summary.json').write_text(
-        json.dumps(all_reports, ensure_ascii=False, indent=2), encoding='utf-8'
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8'
     )
     print('\nAll done. Summary saved to', OUT_DIR / '_summary.json')
 

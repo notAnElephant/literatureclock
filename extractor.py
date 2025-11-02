@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json, re, sys, unicodedata
+import json, json5, re, sys, unicodedata
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Any
 
 from bs4 import BeautifulSoup
 from bs4.dammit import UnicodeDammit
 
-RULES_PATH = Path(__file__).with_name("rules.json")
+RULES_PATH = Path(__file__).with_name("rules.json5")
 
 # ---------- utils ----------
 def norm(s: str) -> str:
@@ -17,7 +17,7 @@ def norm(s: str) -> str:
     return "".join(c for c in s if not unicodedata.combining(c))
 
 def load_rules() -> dict:
-    rules = json.loads(RULES_PATH.read_text(encoding="utf-8"))
+    rules = json5.loads(RULES_PATH.read_text(encoding="utf-8"))
     for r in rules["rules"]:
         r["_re"] = re.compile(r["pattern"], re.IGNORECASE | re.UNICODE)
     return rules

@@ -21,6 +21,7 @@
       "pattern": "(?<!\\d)\\b([01]?\\d|2[0-3])\\.([0-5]\\d)\\b(?!\\d)",
       "semantics": "clock_hh_mm"
     },
+    //    TODO is this working?
     {
       "id": "x_ora_y_perc_digits",
       "description": "X óra Y perc / perckor (24h digits).",
@@ -108,27 +109,73 @@
     "tizenkettő": 12
   },
   "number_words": {
-    "0": ["nulla","zéró"],
-    "1": ["egy"],
-    "2": ["kettő","két"],
-    "3": ["három"],
-    "4": ["négy"],
-    "5": ["öt"],
-    "6": ["hat"],
-    "7": ["hét"],
-    "8": ["nyolc"],
-    "9": ["kilenc"],
-    "10": ["tíz"],
-    "11": ["tizenegy"],
-    "12": ["tizenkettő"],
-    "13_19_prefix": ["tizen"],
-    "20_exact": ["húsz"],
-    "20s_prefix": ["huszon"],
-    "30_exact": ["harminc"],
-    "30s_prefix": ["harminc"],
-    "40_exact": ["negyven"],
-    "40s_prefix": ["negyven"],
-    "50_exact": ["ötven"],
-    "50s_prefix": ["ötven"]
+    "0": [
+      "nulla",
+      "zéró"
+    ],
+    "1": [
+      "egy"
+    ],
+    "2": [
+      "kettő",
+      "két"
+    ],
+    "3": [
+      "három"
+    ],
+    "4": [
+      "négy"
+    ],
+    "5": [
+      "öt"
+    ],
+    "6": [
+      "hat"
+    ],
+    "7": [
+      "hét"
+    ],
+    "8": [
+      "nyolc"
+    ],
+    "9": [
+      "kilenc"
+    ],
+    "10": [
+      "tíz"
+    ],
+    "11": [
+      "tizenegy"
+    ],
+    "12": [
+      "tizenkettő"
+    ],
+    "13_19_prefix": [
+      "tizen"
+    ],
+    "20_exact": [
+      "húsz"
+    ],
+    "20s_prefix": [
+      "huszon"
+    ],
+    "30_exact": [
+      "harminc"
+    ],
+    "30s_prefix": [
+      "harminc"
+    ],
+    "40_exact": [
+      "negyven"
+    ],
+    "40s_prefix": [
+      "negyven"
+    ],
+    "50_exact": [
+      "ötven"
+    ],
+    "50s_prefix": [
+      "ötven"
+    ]
   }
 }
