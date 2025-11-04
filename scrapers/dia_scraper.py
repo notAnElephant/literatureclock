@@ -1,7 +1,28 @@
 from pathlib import Path
 
+import requests
 from bs4 import BeautifulSoup
 import re
+
+
+# todo this only gets the links for the authors, not the links to all of their novels/poems
+'''
+Extracts all author links from the DIA homepage.
+'''
+def get_all_author_links():
+    response = requests.get('https://dia.hu/')
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    author_links = []
+
+    for link in soup.select('a.authors-block--author'):
+        href = link.get('href')
+        if href:
+            full_url = f'https://dia.hu{href}'
+            author_links.append(full_url)
+
+    return author_links
 
 
 # TODO this works for the local file, but lets make it download from the web too
@@ -42,5 +63,7 @@ def dia_scraper():
 
 
 if __name__ == '__main__':
-    dia_scraper()
+    # dia_scraper()
+    links = get_all_author_links()
+    print(links)
 
