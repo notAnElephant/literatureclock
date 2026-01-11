@@ -4,6 +4,7 @@ import logging
 import random
 import re
 from pathlib import Path
+from collections import defaultdict
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -82,6 +83,7 @@ class TimeTermGenerator:
 
     def generate_terms(self, h, m):
         terms = set()
+        # Removed dotted patterns as requested
         terms.add(f"{h}:{m:02}")
         terms.add(f"{h:02}:{m:02}")
         terms.add(f"{h} óra {m} perc")
@@ -198,7 +200,6 @@ class MekSearcher:
                     # Structure: <div class="hit"><a class="etitem" href="...">...</a>...</div>
                     link_elem = soup.find('a', class_='etitem')
                     if not link_elem:
-                        # Sometimes .hit might not contain .etitem? Log warning.
                         logging.warning(f"Hit {i}: Could not find .etitem inside .hit")
                         continue
 
@@ -211,8 +212,9 @@ class MekSearcher:
                     title = title_elem.get_text(strip=True) if title_elem else ""
                         
                     snippet_elem = link_elem.find(class_='foundtext')
-                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
-                        
+                    # Use str() to preserve the entire element including tags
+                    snippet = str(snippet_elem) if snippet_elem else ""
+                    
                     full_title = f"{author}: {title}" if author else title
 
                     if full_title:
@@ -252,6 +254,8 @@ def main():
     searcher = MekSearcher(headless=not args.visible)
 
     try:
+        term_to_times = defaultdict(set)
+        
         if args.term:
             # Single term mode
             term = args.term
@@ -260,14 +264,15 @@ def main():
         else:
             # Generator mode
             generator = TimeTermGenerator(rules)
-            all_terms = set()
             logging.info("Generating search terms...")
             for h in range(24):
                 for m in range(60):
                     terms = generator.generate_terms(h, m)
-                    all_terms.update(terms)
+                    time_str = f"{h:02}:{m:02}"
+                    for t in terms:
+                        term_to_times[t].add(time_str)
             
-            sorted_terms = sorted(list(all_terms))
+            sorted_terms = sorted(list(term_to_times.keys()))
             logging.info(f"Generated {len(sorted_terms)} unique search terms.")
             
             if args.limit > 0:
@@ -282,12 +287,25 @@ def main():
             for i, term in enumerate(search_queue):
                 logging.info(f"[{i+1}/{len(search_queue)}] Searching: {term}")
                 results = searcher.search(term)
+                
+                # Get valid times for this term
+                valid_times = list(term_to_times.get(term, []))
+                
                 if results:
                     logging.info(f"  -> Found {len(results)} matches.")
                     for res in results:
+                        # Inject valid_times into the result object
+                        res["valid_times"] = valid_times
                         f.write(json.dumps(res, ensure_ascii=False) + "\n")
                 else:
                     logging.info("  -> No matches.")
+                    # Write entry for no match
+                    no_match_record = {
+                        "search_term": term,
+                        "valid_times": valid_times,
+                        "count": 0
+                    }
+                    f.write(json.dumps(no_match_record, ensure_ascii=False) + "\n")
                 f.flush()
 
     finally:
