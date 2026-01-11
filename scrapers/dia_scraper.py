@@ -1,4 +1,5 @@
 import re
+import json
 from pathlib import Path
 
 import requests
@@ -28,7 +29,7 @@ def get_all_author_names():
     return author_names
 
 
-def parse_works_from_page(page_source):
+def parse_works_from_page(page_source, author_name):
     """
     Parses the works from a given HTML page source.
     (This is your original dia_scraper, modified to accept HTML)
@@ -36,7 +37,23 @@ def parse_works_from_page(page_source):
     soup = BeautifulSoup(page_source, 'html.parser')
     urls = []
 
+    # Determine surname for filtering
+    # If "Apollinaire, Guillaume" -> "Apollinaire"
+    # If "Ady Endre" -> "Ady"
+    target_surname = author_name.split(',')[0].strip().split()[0].lower()
+
     for record in soup.select('div.data-wrapper-opus'):
+        # Filter by author name to avoid including works where the author is just a translator/subject
+        record_text = record.get_text(strip=True)
+        # Format usually "Author Name: Title"
+        parts = record_text.split(':', 1)
+        if parts:
+            record_author = parts[0].strip().lower()
+            # Simple check: does the surname appear in the record's author field?
+            if target_surname not in record_author:
+                # logging.debug(f"Skipping work by '{parts[0]}' (target: '{author_name}')")
+                continue
+
         # Extract epubId from /record/-/record/PIMDIAxxxx
         link = record.select_one('a[href*="PIMDIA"]')
         if not link:
@@ -56,10 +73,14 @@ def parse_works_from_page(page_source):
             continue
         component = hidden_span.text.strip()
 
-        url = f'http://reader.dia.hu/online-reader/open?epubId={epub_id}&component={component}&locale=hu'
+        # Clean component: remove the trailing ID (e.g. -03790) if present
+        # Example: Ady_Endre-Ady_Endre_osszes_versei-03790 -> Ady_Endre-Ady_Endre_osszes_versei
+        clean_component = re.sub(r'-\d+$', '', component)
+
+        url = f'https://reader.dia.hu/document/{clean_component}-{epub_id}'
         urls.append(url)
 
-    print(f'Found {len(urls)} reader URLs on this page.')
+    print(f'Found {len(urls)} reader URLs on this page (after filtering).')
     return urls
 
 
@@ -92,10 +113,10 @@ def get_all_works_for_author(driver, author_name):
             break  # Stop if no works are found (or on timeout)
 
         # Parse the works from the current page
-        works_on_page = parse_works_from_page(driver.page_source)
+        works_on_page = parse_works_from_page(driver.page_source, author_name)
         # If no works on page 1, we'll just let the "next button" check fail
         if not works_on_page and page_num == 1:
-            print("No works found on page 1.")
+            print("No works found on page 1 (or all filtered out).")
 
         all_works.extend(works_on_page)
 
@@ -175,11 +196,11 @@ if __name__ == '__main__':
 
         # todo modify here after testing
         # --- For testing, just run on the first 3 authors ---
-        test_names = names[:3]
-        print(f"Testing with first 3 authors: {test_names}")
+        # test_names = ['Ady Endre', 'Apollinaire, Guillaume']
+        # print(f"Testing with first 3 authors: {test_names}")
 
         # --- To run on all authors, comment out the line above and uncomment the line below ---
-        # test_names = names
+        test_names = names
 
         all_author_works = {}
 
@@ -195,6 +216,7 @@ if __name__ == '__main__':
                     seen.add(w)
             
             all_author_works[name] = unique_works
+            # note: raw might be way higher because poets tend to have a cumulative edit with all their works uploaded
             print(f"*** Total works found for {name}: {len(unique_works)} (Raw: {len(works)}) ***")
 
         print("\nScraping complete, writing results to files...")
@@ -206,7 +228,7 @@ if __name__ == '__main__':
         output_dir.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_dir, 'w', encoding='utf-8') as f:
-            f.write(str(all_author_works))
+            json.dump(all_author_works, f, ensure_ascii=False, indent=2)
         print(f"Results written to {output_dir}")
 
     finally:
