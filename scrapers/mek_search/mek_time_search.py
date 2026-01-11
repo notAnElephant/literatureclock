@@ -12,7 +12,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Setup logging
@@ -165,6 +165,14 @@ class MekSearcher:
             search_input = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.NAME, "body"))
             )
+            
+            # Set results per page to 100
+            try:
+                size_select = Select(self.driver.find_element(By.NAME, "size"))
+                size_select.select_by_value("100")
+            except Exception as e:
+                logging.warning(f"Could not set result size to 100: {e}")
+
             quoted_term = f'"{term}"'
             logging.info(f"Searching for: {quoted_term}")
             search_input.clear()
