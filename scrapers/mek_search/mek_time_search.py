@@ -1,16 +1,17 @@
-import json
-import re
-import time
 import argparse
-import random
+import json
 import logging
+import random
+import re
 from pathlib import Path
+
+from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Setup logging
@@ -83,8 +84,6 @@ class TimeTermGenerator:
         terms = set()
         terms.add(f"{h}:{m:02}")
         terms.add(f"{h:02}:{m:02}")
-        terms.add(f"{h}.{m:02}")
-        terms.add(f"{h:02}.{m:02}")
         terms.add(f"{h} óra {m} perc")
         terms.add(f"{h:02} óra {m:02} perc")
         terms.add(f"{h} óra {m:02} perc")
@@ -180,31 +179,39 @@ class MekSearcher:
                 logging.info("  -> No hits found (timeout waiting for .hit).")
                 return []
             
+            # Grab all HTML immediately to avoid StaleElementReferenceException
             hit_divs = self.driver.find_elements(By.CLASS_NAME, "hit")
             logging.info(f"Found {len(hit_divs)} hit blocks.")
             
+            hits_html = []
             for div in hit_divs:
                 try:
-                    link_elem = div.find_element(By.CLASS_NAME, "etitem")
-                    link = link_elem.get_attribute("href")
+                    hits_html.append(div.get_attribute('outerHTML'))
+                except Exception as e:
+                    logging.warning(f"Error grabbing HTML for a hit: {e}")
+
+            # Parse with BeautifulSoup
+            for i, html in enumerate(hits_html):
+                try:
+                    soup = BeautifulSoup(html, 'html.parser')
                     
-                    author = ""
-                    try:
-                        author = link_elem.find_element(By.CLASS_NAME, "dcauthor").text
-                    except:
-                        pass
+                    # Structure: <div class="hit"><a class="etitem" href="...">...</a>...</div>
+                    link_elem = soup.find('a', class_='etitem')
+                    if not link_elem:
+                        # Sometimes .hit might not contain .etitem? Log warning.
+                        logging.warning(f"Hit {i}: Could not find .etitem inside .hit")
+                        continue
+
+                    link = link_elem.get('href', '')
+                    
+                    author_elem = link_elem.find(class_='dcauthor')
+                    author = author_elem.get_text(strip=True) if author_elem else ""
                         
-                    title = ""
-                    try:
-                        title = link_elem.find_element(By.CLASS_NAME, "dctitle").text
-                    except:
-                        pass
+                    title_elem = link_elem.find(class_='dctitle')
+                    title = title_elem.get_text(strip=True) if title_elem else ""
                         
-                    snippet = ""
-                    try:
-                        snippet = link_elem.find_element(By.CLASS_NAME, "foundtext").text
-                    except:
-                        pass
+                    snippet_elem = link_elem.find(class_='foundtext')
+                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
                         
                     full_title = f"{author}: {title}" if author else title
 
@@ -215,8 +222,11 @@ class MekSearcher:
                             "link": link,
                             "snippet": snippet
                         })
+                    else:
+                         logging.warning(f"Hit {i}: Skipped because title is empty.")
+
                 except Exception as e:
-                    logging.warning(f"Error parsing a hit block: {e}")
+                    logging.warning(f"Error parsing hit block {i}: {e}")
                     
         except Exception as e:
             logging.error(f"Error during search for '{term}': {e}")
@@ -230,6 +240,7 @@ def main():
     parser.add_argument("--limit", type=int, default=5, help="Max number of terms to search.")
     parser.add_argument("--output", default="mek_search_results.jsonl", help="Output file path.")
     parser.add_argument("--visible", action="store_true", help="Run browser in visible mode.")
+    parser.add_argument("--term", help="Search for a specific term (ignores generator).")
     args = parser.parse_args()
 
     rules_path = Path(__file__).parent.parent.parent / 'rules.json5'
@@ -238,25 +249,32 @@ def main():
         logging.error("Could not load rules. Exiting.")
         return
 
-    generator = TimeTermGenerator(rules)
     searcher = MekSearcher(headless=not args.visible)
 
     try:
-        all_terms = set()
-        logging.info("Generating search terms...")
-        for h in range(24):
-            for m in range(60):
-                terms = generator.generate_terms(h, m)
-                all_terms.update(terms)
-        
-        sorted_terms = sorted(list(all_terms))
-        logging.info(f"Generated {len(sorted_terms)} unique search terms.")
-        
-        if args.limit > 0:
-            logging.info(f"Test mode: selecting {args.limit} random terms.")
-            search_queue = random.sample(sorted_terms, min(args.limit, len(sorted_terms)))
+        if args.term:
+            # Single term mode
+            term = args.term
+            logging.info(f"Single term mode: {term}")
+            search_queue = [term]
         else:
-            search_queue = sorted_terms
+            # Generator mode
+            generator = TimeTermGenerator(rules)
+            all_terms = set()
+            logging.info("Generating search terms...")
+            for h in range(24):
+                for m in range(60):
+                    terms = generator.generate_terms(h, m)
+                    all_terms.update(terms)
+            
+            sorted_terms = sorted(list(all_terms))
+            logging.info(f"Generated {len(sorted_terms)} unique search terms.")
+            
+            if args.limit > 0:
+                logging.info(f"Test mode: selecting {args.limit} random terms.")
+                search_queue = random.sample(sorted_terms, min(args.limit, len(sorted_terms)))
+            else:
+                search_queue = sorted_terms
 
         logging.info(f"Starting search for {len(search_queue)} terms...")
         
