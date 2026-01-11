@@ -158,7 +158,7 @@ class MekSearcher:
         self.url = "https://mek.oszk.hu/hu/search/elfulltext/#sealist"
         
     def search(self, term):
-        results = []
+        raw_results = []
         try:
             logging.info(f"Navigating to {self.url}...")
             self.driver.get(self.url)
@@ -180,7 +180,7 @@ class MekSearcher:
             submit_btn = self.driver.find_element(By.XPATH, "//input[@type='submit']")
             submit_btn.click()
             
-            # Wait for results (looking for .hit elements)
+            # Wait for results
             try:
                 WebDriverWait(self.driver, 5).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "hit"))
@@ -189,7 +189,7 @@ class MekSearcher:
                 logging.info("  -> No hits found (timeout waiting for .hit).")
                 return []
             
-            # Grab all HTML immediately to avoid StaleElementReferenceException
+            # Grab all HTML immediately
             hit_divs = self.driver.find_elements(By.CLASS_NAME, "hit")
             logging.info(f"Found {len(hit_divs)} hit blocks.")
             
@@ -205,7 +205,6 @@ class MekSearcher:
                 try:
                     soup = BeautifulSoup(html, 'html.parser')
                     
-                    # Structure: <div class="hit"><a class="etitem" href="...">...</a>...</div>
                     link_elem = soup.find('a', class_='etitem')
                     if not link_elem:
                         logging.warning(f"Hit {i}: Could not find .etitem inside .hit")
@@ -220,13 +219,12 @@ class MekSearcher:
                     title = title_elem.get_text(strip=True) if title_elem else ""
                         
                     snippet_elem = link_elem.find(class_='foundtext')
-                    # Use str() to preserve the entire element including tags
                     snippet = str(snippet_elem) if snippet_elem else ""
                     
                     full_title = f"{author}: {title}" if author else title
 
                     if full_title:
-                        results.append({
+                        raw_results.append({
                             "search_term": term,
                             "title": full_title,
                             "link": link,
@@ -237,10 +235,45 @@ class MekSearcher:
 
                 except Exception as e:
                     logging.warning(f"Error parsing hit block {i}: {e}")
+            
+            # Filter results based on literature category
+            if raw_results:
+                logging.info(f"Checking {len(raw_results)} hits for literature category...")
+                valid_results = []
+                fallback_results = []
+                
+                for res in raw_results:
+                    is_lit, topics = self.check_is_literature(res['link'])
+                    res['is_literature'] = is_lit
+                    res['topics'] = topics
+                    if is_lit:
+                        valid_results.append(res)
+                    else:
+                        fallback_results.append(res)
+                
+                if valid_results:
+                    logging.info(f"  -> {len(valid_results)} literature hits kept.")
+                    return valid_results
+                elif fallback_results:
+                    logging.info(f"  -> 0 literature hits. Returning {len(fallback_results)} non-literature hits as fallback.")
+                    return fallback_results
                     
         except Exception as e:
             logging.error(f"Error during search for '{term}': {e}")
-        return results
+        return []
+
+    def check_is_literature(self, link):
+        if not link:
+            return False, []
+        try:
+            self.driver.get(link)
+            tags = self.driver.find_elements(By.CSS_SELECTOR, ".topic, .subtopic")
+            topics = [t.text for t in tags]
+            is_lit = any("irodalom" in t.lower() for t in topics)
+            return is_lit, topics
+        except Exception as e:
+            logging.warning(f"Failed to check link {link}: {e}")
+            return False, []
 
     def close(self):
         self.driver.quit()
@@ -265,12 +298,10 @@ def main():
         term_to_times = defaultdict(set)
         
         if args.term:
-            # Single term mode
             term = args.term
             logging.info(f"Single term mode: {term}")
             search_queue = [term]
         else:
-            # Generator mode
             generator = TimeTermGenerator(rules)
             logging.info("Generating search terms...")
             for h in range(24):
@@ -296,18 +327,15 @@ def main():
                 logging.info(f"[{i+1}/{len(search_queue)}] Searching: {term}")
                 results = searcher.search(term)
                 
-                # Get valid times for this term
                 valid_times = list(term_to_times.get(term, []))
                 
                 if results:
                     logging.info(f"  -> Found {len(results)} matches.")
                     for res in results:
-                        # Inject valid_times into the result object
                         res["valid_times"] = valid_times
                         f.write(json.dumps(res, ensure_ascii=False) + "\n")
                 else:
                     logging.info("  -> No matches.")
-                    # Write entry for no match
                     no_match_record = {
                         "search_term": term,
                         "valid_times": valid_times,
