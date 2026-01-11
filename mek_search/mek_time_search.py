@@ -170,54 +170,35 @@ class MekSearcher:
             search_input.send_keys(quoted_term)
             submit_btn = self.driver.find_element(By.XPATH, "//input[@type='submit']")
             submit_btn.click()
-            
-            # Wait for results (looking for .hit elements)
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "hit"))
-                )
-            except TimeoutException:
-                logging.info("  -> No hits found (timeout waiting for .hit).")
-                return []
-            
-            hit_divs = self.driver.find_elements(By.CLASS_NAME, "hit")
-            logging.info(f"Found {len(hit_divs)} hit blocks.")
-            
-            for div in hit_divs:
+            time.sleep(2)
+            result_divs = self.driver.find_elements(By.CSS_SELECTOR, "div.results, div.elful.results")
+            logging.info(f"Found {len(result_divs)} result blocks.")
+            for div in result_divs:
+                text = div.text
+                if "Találatok száma" in text:
+                    continue
                 try:
-                    link_elem = div.find_element(By.CLASS_NAME, "etitem")
-                    link = link_elem.get_attribute("href")
-                    
-                    author = ""
-                    try:
-                        author = link_elem.find_element(By.CLASS_NAME, "dcauthor").text
-                    except:
-                        pass
-                        
-                    title = ""
-                    try:
-                        title = link_elem.find_element(By.CLASS_NAME, "dctitle").text
-                    except:
-                        pass
-                        
-                    snippet = ""
-                    try:
-                        snippet = link_elem.find_element(By.CLASS_NAME, "foundtext").text
-                    except:
-                        pass
-                        
-                    full_title = f"{author}: {title}" if author else title
+                    title_link = div.find_element(By.TAG_NAME, "a")
+                    title = title_link.text
+                    link = title_link.get_attribute("href")
+                except:
+                    title = "Unknown"
+                    link = ""
+                snippet = ""
+                try:
+                    loc_links = div.find_elements(By.PARTIAL_LINK_TEXT, "Találat helye")
+                    if loc_links:
+                        snippet = div.text
+                except:
+                    pass
 
-                    if full_title:
-                        results.append({
-                            "search_term": term,
-                            "title": full_title,
-                            "link": link,
-                            "snippet": snippet
-                        })
-                except Exception as e:
-                    logging.warning(f"Error parsing a hit block: {e}")
-                    
+                if title and title != "Unknown":
+                    results.append({
+                        "search_term": term,
+                        "title": title,
+                        "link": link,
+                        "snippet": snippet
+                    })
         except Exception as e:
             logging.error(f"Error during search for '{term}': {e}")
         return results
@@ -232,7 +213,7 @@ def main():
     parser.add_argument("--visible", action="store_true", help="Run browser in visible mode.")
     args = parser.parse_args()
 
-    rules_path = Path(__file__).parent.parent.parent / 'rules.json5'
+    rules_path = Path(__file__).parent.parent / 'rules.json5'
     rules = load_rules(rules_path)
     if not rules:
         logging.error("Could not load rules. Exiting.")
