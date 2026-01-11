@@ -1,35 +1,39 @@
+import re
 from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
-import re
+from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
 
 
-# todo this only gets the links for the authors, not the links to all of their novels/poems
-'''
-Extracts all author links from the DIA homepage.
-'''
-def get_all_author_links():
+def get_all_author_names():
+    """
+    Fetches all author names from the main DIA page.
+    (This function is fast, so requests is fine here)
+    """
+    print("Fetching all author names...")
     response = requests.get('https://dia.hu/')
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
-
-    author_links = []
-
+    author_names = []
     for link in soup.select('a.authors-block--author'):
-        href = link.get('href')
-        if href:
-            full_url = f'https://dia.hu{href}'
-            author_links.append(full_url)
-
-    return author_links
+        author_names.append(link.text)
+    print(f"Found {len(author_names)} authors.")
+    return author_names
 
 
-# TODO this works for the local file, but lets make it download from the web too
-def dia_scraper():
-    html = Path('/Users/oraisz/Downloads/solr').read_text(encoding='utf-8')
-    soup = BeautifulSoup(html, 'html.parser')
-
+def parse_works_from_page(page_source):
+    """
+    Parses the works from a given HTML page source.
+    (This is your original dia_scraper, modified to accept HTML)
+    """
+    soup = BeautifulSoup(page_source, 'html.parser')
     urls = []
 
     for record in soup.select('div.data-wrapper-opus'):
@@ -55,15 +59,157 @@ def dia_scraper():
         url = f'http://reader.dia.hu/online-reader/open?epubId={epub_id}&component={component}&locale=hu'
         urls.append(url)
 
-    print(f'Found {len(urls)} reader URLs:')
+    print(f'Found {len(urls)} reader URLs on this page.')
+    return urls
 
-    # TODO extract the text using the links
-    for u in urls:
-        print(u)
+
+def get_all_works_for_author(driver, author_name):
+    """
+    Gets all works for a given author using Selenium to navigate and click.
+    """
+    all_works = []
+    initial_url = f'https://resolver.pim.hu/dia/muvek/"{author_name}"'
+
+    try:
+        driver.get(initial_url)
+    except Exception as e:
+        print(f"Error navigating to initial URL for {author_name}: {e}")
+        return []
+
+    page_num = 1
+    while True:
+        print(f"Scraping page {page_num} for {author_name}...")
+        try:
+            # Wait for the list of works OR the pagination controls to be present
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.data-wrapper-opus, p.pager"))
+            )
+        except TimeoutException:
+            if page_num == 1:
+                print(f"No works found on the first page for {author_name}. Skipping.")
+            else:
+                print("Timed out waiting for new page content. Assuming end of pages.")
+            break  # Stop if no works are found (or on timeout)
+
+        # Parse the works from the current page
+        works_on_page = parse_works_from_page(driver.page_source)
+        # If no works on page 1, we'll just let the "next button" check fail
+        if not works_on_page and page_num == 1:
+            print("No works found on page 1.")
+
+        all_works.extend(works_on_page)
+
+        try:
+            # Find the "Next" button based on the icon class you provided
+            next_button_icon = driver.find_element(By.CSS_SELECTOR, "p.pager i.fa-angle-right")
+            # Get the parent <button> element
+            next_button = next_button_icon.find_element(By.XPATH, "parent::button")
+
+            # Check if the button is disabled
+            if "disabled" in next_button.get_attribute("class"):
+                print("Next button is disabled. Reached the last page.")
+                break
+
+            # Capture an element from the current page to check for staleness
+            try:
+                current_content = driver.find_element(By.CSS_SELECTOR, "div.data-wrapper-opus")
+            except NoSuchElementException:
+                current_content = None
+
+            # If not disabled, click it to go to the next page
+            print("Clicking 'Next' button...")
+            driver.execute_script("arguments[0].click();", next_button)
+            
+            # Wait for the page to update
+            if current_content:
+                try:
+                    WebDriverWait(driver, 10).until(EC.staleness_of(current_content))
+                except TimeoutException:
+                    print("Timed out waiting for page update (staleness). Proceeding anyway...")
+
+            # Wait for new content to load
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.data-wrapper-opus"))
+                )
+            except TimeoutException:
+                 print("Timed out waiting for new content to appear.")
+
+            page_num += 1
+
+        except NoSuchElementException:
+            print("No 'Next' button found. Assuming single page of results.")
+            break
+        except Exception as e:
+            print(f"Error clicking next button: {e}")
+            break
+
+    return all_works
 
 
 if __name__ == '__main__':
-    # dia_scraper()
-    links = get_all_author_links()
-    print(links)
+    # --- IMPORTANT ---
+    # You must install selenium and webdriver-manager first:
+    # pip install selenium webdriver-manager
 
+    print("Setting up Selenium WebDriver...")
+    # This automatically downloads and manages chromedriver
+    service = ChromeService(ChromeDriverManager().install())
+
+    # Use headless mode to run without opening a visible browser window
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(service=service, options=options)
+
+    print("WebDriver set up successfully.")
+
+    try:
+        names = get_all_author_names()
+
+        if not names:
+            print("No authors found. Exiting.")
+            driver.quit()
+            exit()
+
+        # todo modify here after testing
+        # --- For testing, just run on the first 3 authors ---
+        test_names = names[:3]
+        print(f"Testing with first 3 authors: {test_names}")
+
+        # --- To run on all authors, comment out the line above and uncomment the line below ---
+        # test_names = names
+
+        all_author_works = {}
+
+        for name in test_names:
+            print(f"\n--- Getting all works for: {name} ---")
+            works = get_all_works_for_author(driver, name)
+            # Remove duplicates if any, preserving order
+            seen = set()
+            unique_works = []
+            for w in works:
+                if w not in seen:
+                    unique_works.append(w)
+                    seen.add(w)
+            
+            all_author_works[name] = unique_works
+            print(f"*** Total works found for {name}: {len(unique_works)} (Raw: {len(works)}) ***")
+
+        print("\nScraping complete, writing results to files...")
+        # Use absolute path relative to script location to avoid CWD issues
+        script_dir = Path(__file__).parent.resolve()
+        output_dir = script_dir.parent / 'dia_downloads' / '_summary.json'
+        
+        # Ensure directory exists
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_dir, 'w', encoding='utf-8') as f:
+            f.write(str(all_author_works))
+        print(f"Results written to {output_dir}")
+
+    finally:
+        # Ensure the browser is closed even if an error occurs
+        print("Closing browser.")
+        driver.quit()
