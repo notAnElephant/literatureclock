@@ -8,7 +8,7 @@ from collections import defaultdict
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -149,117 +149,144 @@ class TimeTermGenerator:
 
 class MekSearcher:
     def __init__(self, headless=True):
+        self.headless = headless
         self.options = webdriver.ChromeOptions()
         if headless:
             self.options.add_argument("--headless")
         self.options.add_argument("--no-sandbox")
         self.options.add_argument("--disable-dev-shm-usage")
-        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.options)
+        self._init_driver()
         self.url = "https://mek.oszk.hu/hu/search/elfulltext/#sealist"
+
+    def _init_driver(self):
+        logging.info("Initializing Chrome Driver...")
+        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.options)
+
+    def restart_driver(self):
+        logging.warning("Restarting Chrome Driver due to error...")
+        try:
+            self.driver.quit()
+        except Exception:
+            pass
+        self._init_driver()
         
     def search(self, term):
-        raw_results = []
-        try:
-            logging.info(f"Navigating to {self.url}...")
-            self.driver.get(self.url)
-            search_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.NAME, "body"))
-            )
-            
-            # Set results per page to 100
+        # Retry loop for driver stability
+        for attempt in range(2):
             try:
-                size_select = Select(self.driver.find_element(By.NAME, "size"))
-                size_select.select_by_value("100")
+                return self._search_attempt(term)
+            except WebDriverException as e:
+                logging.error(f"WebDriver error during search for '{term}' (attempt {attempt+1}/2): {e}")
+                if attempt == 0:
+                    self.restart_driver()
+                else:
+                    logging.error("Failed to search even after restart.")
+                    return []
             except Exception as e:
-                logging.warning(f"Could not set result size to 100: {e}")
-
-            quoted_term = f'"{term}"'
-            logging.info(f"Searching for: {quoted_term}")
-            search_input.clear()
-            search_input.send_keys(quoted_term)
-            submit_btn = self.driver.find_element(By.XPATH, "//input[@type='submit']")
-            submit_btn.click()
-            
-            # Wait for results
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "hit"))
-                )
-            except TimeoutException:
-                logging.info("  -> No hits found (timeout waiting for .hit).")
+                logging.error(f"Unexpected error during search for '{term}': {e}")
                 return []
-            
-            # Grab all HTML immediately
-            hit_divs = self.driver.find_elements(By.CLASS_NAME, "hit")
-            logging.info(f"Found {len(hit_divs)} hit blocks.")
-            
-            hits_html = []
-            for div in hit_divs:
-                try:
-                    hits_html.append(div.get_attribute('outerHTML'))
-                except Exception as e:
-                    logging.warning(f"Error grabbing HTML for a hit: {e}")
+        return []
 
-            # Parse with BeautifulSoup
-            for i, html in enumerate(hits_html):
-                try:
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    link_elem = soup.find('a', class_='etitem')
-                    if not link_elem:
-                        logging.warning(f"Hit {i}: Could not find .etitem inside .hit")
-                        continue
-
-                    link = link_elem.get('href', '')
-                    
-                    author_elem = link_elem.find(class_='dcauthor')
-                    author = author_elem.get_text(strip=True) if author_elem else ""
-                        
-                    title_elem = link_elem.find(class_='dctitle')
-                    title = title_elem.get_text(strip=True) if title_elem else ""
-                        
-                    snippet_elem = link_elem.find(class_='foundtext')
-                    snippet = str(snippet_elem) if snippet_elem else ""
-                    
-                    full_title = f"{author}: {title}" if author else title
-
-                    if full_title:
-                        raw_results.append({
-                            "search_term": term,
-                            "title": full_title,
-                            "link": link,
-                            "snippet": snippet
-                        })
-                    else:
-                         logging.warning(f"Hit {i}: Skipped because title is empty.")
-
-                except Exception as e:
-                    logging.warning(f"Error parsing hit block {i}: {e}")
-            
-            # Filter results based on literature category
-            if raw_results:
-                logging.info(f"Checking {len(raw_results)} hits for literature category...")
-                valid_results = []
-                fallback_results = []
-                
-                for res in raw_results:
-                    is_lit, topics = self.check_is_literature(res['link'])
-                    res['is_literature'] = is_lit
-                    res['topics'] = topics
-                    if is_lit:
-                        valid_results.append(res)
-                    else:
-                        fallback_results.append(res)
-                
-                if valid_results:
-                    logging.info(f"  -> {len(valid_results)} literature hits kept.")
-                    return valid_results
-                elif fallback_results:
-                    logging.info(f"  -> 0 literature hits. Returning {len(fallback_results)} non-literature hits as fallback.")
-                    return fallback_results
-                    
+    def _search_attempt(self, term):
+        raw_results = []
+        logging.info(f"Navigating to {self.url}...")
+        self.driver.get(self.url)
+        search_input = WebDriverWait(self.driver, 10).until(
+            EC.presence_of_element_located((By.NAME, "body"))
+        )
+        
+        # Set results per page to 100
+        try:
+            size_select = Select(self.driver.find_element(By.NAME, "size"))
+            size_select.select_by_value("100")
         except Exception as e:
-            logging.error(f"Error during search for '{term}': {e}")
+            logging.warning(f"Could not set result size to 100: {e}")
+
+        quoted_term = f'"{term}"'
+        logging.info(f"Searching for: {quoted_term}")
+        search_input.clear()
+        search_input.send_keys(quoted_term)
+        submit_btn = self.driver.find_element(By.XPATH, "//input[@type='submit']")
+        submit_btn.click()
+        
+        # Wait for results
+        try:
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "hit"))
+            )
+        except TimeoutException:
+            logging.info("  -> No hits found (timeout waiting for .hit).")
+            return []
+        
+        # Grab all HTML immediately
+        hit_divs = self.driver.find_elements(By.CLASS_NAME, "hit")
+        logging.info(f"Found {len(hit_divs)} hit blocks.")
+        
+        hits_html = []
+        for div in hit_divs:
+            try:
+                hits_html.append(div.get_attribute('outerHTML'))
+            except Exception as e:
+                logging.warning(f"Error grabbing HTML for a hit: {e}")
+
+        # Parse with BeautifulSoup
+        for i, html in enumerate(hits_html):
+            try:
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                link_elem = soup.find('a', class_='etitem')
+                if not link_elem:
+                    logging.warning(f"Hit {i}: Could not find .etitem inside .hit")
+                    continue
+
+                link = link_elem.get('href', '')
+                
+                author_elem = link_elem.find(class_='dcauthor')
+                author = author_elem.get_text(strip=True) if author_elem else ""
+                    
+                title_elem = link_elem.find(class_='dctitle')
+                title = title_elem.get_text(strip=True) if title_elem else ""
+                    
+                snippet_elem = link_elem.find(class_='foundtext')
+                snippet = str(snippet_elem) if snippet_elem else ""
+                
+                full_title = f"{author}: {title}" if author else title
+
+                if full_title:
+                    raw_results.append({
+                        "search_term": term,
+                        "title": full_title,
+                        "link": link,
+                        "snippet": snippet
+                    })
+                else:
+                        logging.warning(f"Hit {i}: Skipped because title is empty.")
+
+            except Exception as e:
+                logging.warning(f"Error parsing hit block {i}: {e}")
+        
+        # Filter results based on literature category
+        if raw_results:
+            logging.info(f"Checking {len(raw_results)} hits for literature category...")
+            valid_results = []
+            fallback_results = []
+            
+            for res in raw_results:
+                is_lit, topics = self.check_is_literature(res['link'])
+                res['is_literature'] = is_lit
+                res['topics'] = topics
+                if is_lit:
+                    valid_results.append(res)
+                else:
+                    fallback_results.append(res)
+            
+            if valid_results:
+                logging.info(f"  -> {len(valid_results)} literature hits kept.")
+                return valid_results
+            elif fallback_results:
+                logging.info(f"  -> 0 literature hits. Returning {len(fallback_results)} non-literature hits as fallback.")
+                return fallback_results
+        
         return []
 
     def check_is_literature(self, link):
@@ -271,6 +298,9 @@ class MekSearcher:
             topics = [t.text for t in tags]
             is_lit = any("irodalom" in t.lower() for t in topics)
             return is_lit, topics
+        except WebDriverException:
+            # Re-raise WebDriverException to trigger driver restart in search()
+            raise
         except Exception as e:
             logging.warning(f"Failed to check link {link}: {e}")
             return False, []
