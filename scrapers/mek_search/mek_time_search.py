@@ -322,6 +322,24 @@ def main():
         logging.error("Could not load rules. Exiting.")
         return
 
+    # Load already processed terms to resume
+    processed_terms = set()
+    output_path = Path(args.output)
+    if output_path.exists():
+        logging.info(f"Reading existing results from {output_path}...")
+        try:
+            with open(output_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        record = json.loads(line)
+                        if "search_term" in record:
+                            processed_terms.add(record["search_term"])
+                    except json.JSONDecodeError:
+                        pass
+            logging.info(f"Found {len(processed_terms)} already processed terms.")
+        except Exception as e:
+            logging.warning(f"Error reading existing file: {e}")
+
     searcher = MekSearcher(headless=not args.visible)
 
     try:
@@ -330,6 +348,8 @@ def main():
         if args.term:
             term = args.term
             logging.info(f"Single term mode: {term}")
+            if term in processed_terms:
+                logging.warning(f"Term '{term}' was already processed. Searching anyway (single term mode).")
             search_queue = [term]
         else:
             generator = TimeTermGenerator(rules)
@@ -344,15 +364,24 @@ def main():
             sorted_terms = sorted(list(term_to_times.keys()))
             logging.info(f"Generated {len(sorted_terms)} unique search terms.")
             
+            # Filter out processed terms
+            remaining_terms = [t for t in sorted_terms if t not in processed_terms]
+            if len(remaining_terms) < len(sorted_terms):
+                logging.info(f"Skipping {len(sorted_terms) - len(remaining_terms)} terms already processed. {len(remaining_terms)} remaining.")
+            
             if args.limit > 0:
-                logging.info(f"Test mode: selecting {args.limit} random terms.")
-                search_queue = random.sample(sorted_terms, min(args.limit, len(sorted_terms)))
+                logging.info(f"Test mode: selecting {args.limit} random terms from remaining.")
+                if not remaining_terms:
+                    logging.info("No remaining terms to process.")
+                    return
+                search_queue = random.sample(remaining_terms, min(args.limit, len(remaining_terms)))
             else:
-                search_queue = sorted_terms
+                search_queue = remaining_terms
 
         logging.info(f"Starting search for {len(search_queue)} terms...")
         
-        with open(args.output, 'w', encoding='utf-8') as f:
+        # Open in APPEND mode
+        with open(args.output, 'a', encoding='utf-8') as f:
             for i, term in enumerate(search_queue):
                 logging.info(f"[{i+1}/{len(search_queue)}] Searching: {term}")
                 results = searcher.search(term)
