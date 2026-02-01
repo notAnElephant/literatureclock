@@ -5,12 +5,17 @@ export async function GET() {
     try {
         const result = await sql`
             SELECT 
-                (SELECT COUNT(*) FROM entries) as total_entries,
-                (SELECT COUNT(DISTINCT entry_id) FROM votes) as voted_entries,
-                (SELECT AVG(rating) FROM votes WHERE rating > 0) as average_rating
+                (SELECT COUNT(*) FROM entries WHERE is_literature = true) as total_entries,
+                (SELECT COUNT(DISTINCT v.entry_id) 
+                 FROM votes v 
+                 JOIN entries e ON v.entry_id = e.id 
+                 WHERE e.is_literature = true) as voted_entries,
+                (SELECT AVG(v.rating) 
+                 FROM votes v 
+                 JOIN entries e ON v.entry_id = e.id 
+                 WHERE v.rating > 0 AND e.is_literature = true) as average_rating
         `;
         
-        // Ensure numbers are returned (Postgres COUNT returns strings sometimes in JS drivers)
         const stats = {
             total_entries: parseInt(result[0].total_entries) || 0,
             voted_entries: parseInt(result[0].voted_entries) || 0,

@@ -13,6 +13,7 @@ export async function GET() {
             const result = await sql`
                 SELECT * FROM entries 
                 WHERE id NOT IN (SELECT entry_id FROM votes)
+                AND is_literature = true
                 ORDER BY RANDOM() 
                 LIMIT 1
             `;
