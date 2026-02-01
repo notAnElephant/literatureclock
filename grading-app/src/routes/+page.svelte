@@ -9,6 +9,10 @@
     let error = null;
     let stats = { total_entries: 0, voted_entries: 0, average_rating: 0 };
     let hasVotedRating = false;
+    
+    // Time Correction
+    let correctedTime = '';
+    let isEditingTime = false;
 
     async function fetchStats() {
         try {
@@ -28,6 +32,8 @@
         timeClass = null;
         error = null;
         hasVotedRating = false;
+        isEditingTime = false;
+        correctedTime = '';
         
         try {
             const res = await fetch('/api/entries');
@@ -66,7 +72,16 @@
         
         const finalRating = isDeny ? 0 : rating;
         const finalTimeClass = isDeny ? (timeClass || 'ambiguous') : timeClass;
-        const voteData = { entry_id: entry.id, rating: finalRating, am_pm: finalTimeClass };
+        
+        // Use corrected time if provided and editing was active or value exists
+        const finalTime = (correctedTime && correctedTime !== entry.valid_times[0]) ? correctedTime : null;
+
+        const voteData = { 
+            entry_id: entry.id, 
+            rating: finalRating, 
+            am_pm: finalTimeClass,
+            corrected_time: finalTime
+        };
         
         fetchEntry();
         
@@ -104,6 +119,9 @@
         font-weight: 900;
         text-decoration: underline;
         color: #000;
+        background-color: #fef08a;
+        padding: 0 2px;
+        border-radius: 2px;
     }
 </style>
 
@@ -135,47 +153,63 @@
             </div>
         {:else if entry}
             <div in:fade={{ duration: 200 }} out:fly={{ x: -200, duration: 300 }} class="absolute inset-0 bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col">
-                <!-- Card Header -->
-                <div class="bg-gray-800 text-white p-4 text-center flex justify-between items-center">
-                    <span class="text-2xl font-mono font-bold">
-                        {entry.valid_times ? entry.valid_times[0] : '??:??'}
-                    </span>
+                <!-- Card Header (Pinned) -->
+                <div class="bg-gray-800 text-white p-4 text-center flex justify-between items-center shrink-0">
+                    <div class="flex items-center">
+                        {#if isEditingTime}
+                            <input 
+                                type="text" 
+                                bind:value={correctedTime} 
+                                placeholder="HH:MM"
+                                class="bg-gray-700 text-white font-mono font-bold text-xl w-24 px-2 py-1 rounded border border-gray-500 focus:outline-none focus:border-blue-400 text-center"
+                            />
+                            <button on:click={() => isEditingTime = false} class="ml-2 text-gray-400 hover:text-white">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+                            </button>
+                        {:else}
+                            <button 
+                                on:click={() => { isEditingTime = true; correctedTime = entry.valid_times ? entry.valid_times[0] : ''; }} 
+                                class="text-2xl font-mono font-bold hover:text-blue-300 transition-colors flex items-center gap-2 group"
+                                title="Click to correct time"
+                            >
+                                {entry.valid_times ? entry.valid_times[0] : '??:??'}
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                            </button>
+                        {/if}
+                    </div>
                     <a href={entry.link} target="_blank" class="text-xs text-blue-300 underline">View Source</a>
                 </div>
 
-                <!-- Content -->
-                <div class="flex-1 p-6 overflow-y-auto flex flex-col">
-                    <div class="text-center mb-6">
-                        <p class="font-bold text-lg text-gray-900">{entry.title}</p>
-                        {#if entry.author}<p class="text-gray-600 italic">by {entry.author}</p>{/if}
-
-                        <!-- Categories -->
-                        {#if entry.categories && entry.categories.length > 0}
-                            <div class="flex flex-wrap gap-1 mt-2 justify-center">
-                                {#each entry.categories as cat}
-                                    <span class="px-2 py-0.5 bg-gray-200 text-gray-600 text-[10px] uppercase tracking-wider rounded-full">
-                                        {cat}
-                                    </span>
-                                {/each}
-                            </div>
-                        {/if}
-                    </div>
-
-                    <div class="prose prose-lg text-gray-700 mb-6 italic text-center flex-1 flex flex-col justify-center">
-                        {#if entry.snippet !== ''}
-                            <div>
-                                {@html entry.snippet}
-                            </div>
-                        {:else}
-                            <div>
-                                <p>No snippet available.</p>
-                            </div>
-                        {/if}
+                <!-- Scrollable Snippet Content (Middle) -->
+                <div class="flex-1 p-6 overflow-y-auto flex flex-col justify-center bg-gray-50/30">
+                    <div class="prose prose-lg text-gray-800 text-center leading-relaxed">
+                        {@html entry.snippet}
                     </div>
                 </div>
 
-                <!-- Controls -->
-                <div class="bg-gray-50 p-4 border-t border-gray-200 space-y-6">
+                <!-- Pinned Meta Info (Author, Title, Categories) -->
+                <div class="p-4 border-t border-gray-100 bg-white shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
+                    <div class="text-center mb-2">
+                        <p class="font-bold text-gray-800 text-sm leading-tight">{entry.title}</p>
+                        {#if entry.author}
+                            <p class="text-xs text-gray-500 uppercase tracking-wide mt-1">{entry.author}</p>
+                        {/if}
+                    </div>
+
+                    <!-- Categories -->
+                    {#if entry.categories && entry.categories.length > 0}
+                        <div class="flex flex-wrap gap-1 justify-center">
+                            {#each entry.categories as cat}
+                                <span class="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] uppercase font-bold rounded-full border border-blue-100">
+                                    {cat}
+                                </span>
+                            {/each}
+                        </div>
+                    {/if}
+                </div>
+
+                <!-- Controls (Pinned Bottom) -->
+                <div class="bg-gray-50 p-4 border-t border-gray-200 space-y-6 shrink-0">
                     
                     <!-- Time Classification -->
                     <div class="grid grid-cols-3 gap-2">

@@ -39,6 +39,7 @@ def seed():
             entry_id INTEGER REFERENCES entries(id),
             rating INTEGER CHECK (rating >= 0 AND rating <= 5),
             am_pm VARCHAR(20),
+            corrected_time VARCHAR(10),
             created_at TIMESTAMP DEFAULT NOW()
         );
     """)

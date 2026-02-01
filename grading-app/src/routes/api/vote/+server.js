@@ -3,11 +3,11 @@ import { json } from '@sveltejs/kit';
 
 export async function POST({ request }) {
     try {
-        const { entry_id, rating, am_pm } = await request.json();
+        const { entry_id, rating, am_pm, corrected_time } = await request.json();
         
         await sql`
-            INSERT INTO votes (entry_id, rating, am_pm)
-            VALUES (${entry_id}, ${rating}, ${am_pm})
+            INSERT INTO votes (entry_id, rating, am_pm, corrected_time)
+            VALUES (${entry_id}, ${rating}, ${am_pm}, ${corrected_time || null})
         `;
         
         return json({ success: true });
