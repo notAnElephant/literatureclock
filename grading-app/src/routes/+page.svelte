@@ -105,6 +105,17 @@
                         <p class="font-bold">{entry.title}</p>
                         {#if entry.author}<p>{entry.author}</p>{/if}
                     </div>
+
+                    <!-- Categories -->
+                    {#if entry.categories && entry.categories.length > 0}
+                        <div class="flex flex-wrap gap-1 mt-4 justify-center">
+                            {#each entry.categories as cat}
+                                <span class="px-2 py-0.5 bg-gray-200 text-gray-600 text-xs rounded-full">
+                                    {cat}
+                                </span>
+                            {/each}
+                        </div>
+                    {/if}
                 </div>
 
                 <!-- Controls -->
