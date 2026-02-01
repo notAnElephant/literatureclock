@@ -106,6 +106,16 @@
         hasVotedRating = true;
     }
 
+    function formatTimeForInput(timeStr) {
+        if (!timeStr) return '';
+        // Ensure HH:MM format (pad hour with 0 if needed)
+        const parts = timeStr.split(':');
+        if (parts.length === 2) {
+            return `${parts[0].padStart(2, '0')}:${parts[1]}`;
+        }
+        return timeStr;
+    }
+
     onMount(() => {
         fetchStats();
         fetchEntry();
@@ -158,17 +168,16 @@
                     <div class="flex items-center">
                         {#if isEditingTime}
                             <input 
-                                type="text" 
+                                type="time" 
                                 bind:value={correctedTime} 
-                                placeholder="HH:MM"
-                                class="bg-gray-700 text-white font-mono font-bold text-xl w-24 px-2 py-1 rounded border border-gray-500 focus:outline-none focus:border-blue-400 text-center"
+                                class="bg-gray-700 text-white font-mono font-bold text-xl w-32 px-2 py-1 rounded border border-gray-500 focus:outline-none focus:border-blue-400 text-center"
                             />
                             <button on:click={() => isEditingTime = false} class="ml-2 text-gray-400 hover:text-white">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
                             </button>
                         {:else}
                             <button 
-                                on:click={() => { isEditingTime = true; correctedTime = entry.valid_times ? entry.valid_times[0] : ''; }} 
+                                on:click={() => { isEditingTime = true; correctedTime = formatTimeForInput(entry.valid_times ? entry.valid_times[0] : ''); }} 
                                 class="text-2xl font-mono font-bold hover:text-blue-300 transition-colors flex items-center gap-2 group"
                                 title="Click to correct time"
                             >
