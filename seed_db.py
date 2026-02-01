@@ -37,7 +37,7 @@ def seed():
         CREATE TABLE votes (
             id SERIAL PRIMARY KEY,
             entry_id INTEGER REFERENCES entries(id),
-            rating INTEGER CHECK (rating >= 1 AND rating <= 5),
+            rating INTEGER CHECK (rating >= 0 AND rating <= 5),
             am_pm VARCHAR(20),
             created_at TIMESTAMP DEFAULT NOW()
         );
