@@ -5,6 +5,7 @@
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/mek_downloads" />
       <excludeFolder url="file://$MODULE_DIR$/dia_downloads" />
+      <excludeFolder url="file://$MODULE_DIR$/grading-app/.svelte-kit" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (literatureclock)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
