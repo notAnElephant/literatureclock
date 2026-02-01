@@ -1,6 +1,6 @@
 <script>
     import { onMount } from 'svelte';
-    import { fade, fly } from 'svelte/transition';
+    import { fade, fly, slide } from 'svelte/transition';
 
     let entry = null;
     let loading = true;
@@ -13,6 +13,7 @@
     // Time Correction
     let correctedTime = '';
     let isEditingTime = false;
+    let isMetaExpanded = false;
 
     async function fetchStats() {
         try {
@@ -33,6 +34,7 @@
         error = null;
         hasVotedRating = false;
         isEditingTime = false;
+        isMetaExpanded = false;
         correctedTime = '';
         
         try {
@@ -196,35 +198,49 @@
                     </div>
                 </div>
 
-                <!-- Pinned Meta Info (Author, Title, Categories) -->
-                <div class="p-4 border-t border-gray-100 bg-white shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
-                    <div class="text-center mb-2">
-                        <p class="font-bold text-gray-800 text-sm leading-tight">{entry.title}</p>
-                        {#if entry.author}
-                            <p class="text-xs text-gray-500 uppercase tracking-wide mt-1">{entry.author}</p>
-                        {/if}
+                <!-- Pinned Meta Info (Collapsible) -->
+                <button 
+                    class="w-full text-left p-2 border-t border-gray-100 bg-white shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10 hover:bg-gray-50 transition-colors"
+                    on:click={() => isMetaExpanded = !isMetaExpanded}
+                >
+                    <div class="flex justify-between items-center">
+                        <div class="truncate text-xs text-gray-700 font-semibold w-full pr-2">
+                            {entry.author ? `${entry.author} - ` : ''}{entry.title}
+                        </div>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 shrink-0 transform transition-transform duration-200 {isMetaExpanded ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                        </svg>
                     </div>
 
-                    <!-- Categories -->
-                    {#if entry.categories && entry.categories.length > 0}
-                        <div class="flex flex-wrap gap-1 justify-center">
-                            {#each entry.categories as cat}
-                                <span class="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] uppercase font-bold rounded-full border border-blue-100">
-                                    {cat}
-                                </span>
-                            {/each}
+                    {#if isMetaExpanded}
+                        <div class="mt-2 text-center border-t border-gray-100 pt-2" transition:slide={{ duration: 200 }}>
+                            <p class="font-bold text-gray-800 text-sm leading-tight mb-1 text-wrap">{entry.title}</p>
+                            {#if entry.author}
+                                <p class="text-xs text-gray-500 uppercase tracking-wide mb-2">{entry.author}</p>
+                            {/if}
+
+                            <!-- Categories -->
+                            {#if entry.categories && entry.categories.length > 0}
+                                <div class="flex flex-wrap gap-1 justify-center">
+                                    {#each entry.categories as cat}
+                                        <span class="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] uppercase font-bold rounded-full border border-blue-100">
+                                            {cat}
+                                        </span>
+                                    {/each}
+                                </div>
+                            {/if}
                         </div>
                     {/if}
-                </div>
+                </button>
 
-                <!-- Controls (Pinned Bottom) -->
-                <div class="bg-gray-50 p-4 border-t border-gray-200 space-y-6 shrink-0">
+                <!-- Controls (Compact) -->
+                <div class="bg-gray-50 p-2 border-t border-gray-200 space-y-2 shrink-0">
                     
                     <!-- Time Classification -->
                     <div class="grid grid-cols-3 gap-2">
                         {#each ['am', 'pm', 'ambiguous'] as t}
                             <button 
-                                class="py-3 px-1 text-xs font-bold rounded-lg uppercase border-2 transition-all
+                                class="py-2 px-1 text-xs font-bold rounded-lg uppercase border-2 transition-all
                                 {timeClass === t 
                                     ? 'border-blue-600 bg-blue-600 text-white shadow-inner scale-95' 
                                     : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}"
@@ -235,14 +251,14 @@
                         {/each}
                     </div>
 
-                    <!-- Star Rating (Full Row) -->
-                    <div class="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                        <span class="text-xs font-bold text-gray-400 uppercase">Rating:</span>
+                    <!-- Star Rating -->
+                    <div class="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase">Rating:</span>
                         <div class="flex space-x-2">
                             {#each [1, 2, 3, 4, 5] as star}
                                 <button 
                                     on:click={() => setRating(star)}
-                                    class="text-3xl focus:outline-none transition-transform active:scale-150"
+                                    class="text-2xl focus:outline-none transition-transform active:scale-125"
                                 >
                                     <span class={star <= rating ? 'text-yellow-400' : 'text-gray-200'}>★</span>
                                 </button>
@@ -254,7 +270,7 @@
                     <div class="flex gap-2">
                         <button 
                             on:click={() => submitVote(true)}
-                            class="flex-1 py-4 rounded-xl font-bold text-red-500 border-2 border-red-100 hover:bg-red-50 transition-all uppercase text-sm"
+                            class="flex-1 py-3 rounded-lg font-bold text-red-500 border-2 border-red-100 hover:bg-red-50 transition-all uppercase text-xs"
                         >
                             Deny
                         </button>
@@ -262,7 +278,7 @@
                         <button 
                             on:click={() => submitVote(false)}
                             disabled={!hasVotedRating || !timeClass}
-                            class="flex-[2] py-4 rounded-xl font-bold text-white transition-all shadow-lg text-sm uppercase
+                            class="flex-[2] py-3 rounded-lg font-bold text-white transition-all shadow-lg text-xs uppercase
                             {!hasVotedRating || !timeClass 
                                 ? 'bg-gray-300 cursor-not-allowed shadow-none' 
                                 : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transform active:scale-95'}"
