@@ -67,11 +67,11 @@ Input Data (JSON):
 {data}
 
 Output Format (JSON):
-Return a list of objects. Each object must have:
+Return a list of objects. Each object must have, in this exact order:
 - "id": (integer) The entry ID from the input.
-- "status": "DENY" or "KEEP"
-- "rate": (integer) 0-5 rating of quality (i.e., 0 for DENY, 5 for perfect KEEP)
 - "reason": (string) Short explanation (e.g., "Date format", "TOC", "Valid quote").
+- "rate": (integer) 0-5 rating of quality (i.e., 0 for DENY, 5 for perfect KEEP)
+- "status": "DENY" or "KEEP"
 """
 
 def get_unchecked_entries(cur, limit):
