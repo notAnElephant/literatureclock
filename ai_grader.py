@@ -177,16 +177,28 @@ def main():
     conn.autocommit = False # We'll commit after each batch
     cur = conn.cursor()
 
+    # Get total count for progress tracking
+    cur.execute("SELECT count(*) FROM entries WHERE ai_checked IS FALSE AND is_literature IS TRUE")
+    total_to_process = cur.fetchone()[0]
+    
+    if total_to_process == 0:
+        print("No unchecked entries found. Everything is already processed.")
+        cur.close()
+        conn.close()
+        return
+
+    print(f"Starting processing of {total_to_process} entries...")
     total_processed = 0
+    start_time = time.time()
 
     try:
         while True:
             entries = get_unchecked_entries(cur, BATCH_SIZE)
             if not entries:
-                print("No more unchecked entries found.")
+                print("\nNo more unchecked entries found.")
                 break
 
-            print(f"Processing batch of {len(entries)} entries...")
+            print(f"\nProcessing batch of {len(entries)} entries...")
             success = process_batch(cur, entries)
             
             if success == "RETRY":
@@ -199,7 +211,21 @@ def main():
             conn.commit()
             
             total_processed += len(entries)
-            print(f"Total processed so far: {total_processed}")
+            elapsed_time = time.time() - start_time
+            
+            # Progress calculations
+            progress_pct = (total_processed / total_to_process) * 100
+            avg_time_per_entry = elapsed_time / total_processed
+            remaining_entries = total_to_process - total_processed
+            etc_seconds = remaining_entries * avg_time_per_entry
+            
+            # Format ETC
+            etc_mins, etc_secs = divmod(int(etc_seconds), 60)
+            etc_hours, etc_mins = divmod(etc_mins, 60)
+            etc_str = f"{etc_hours:02d}:{etc_mins:02d}:{etc_secs:02d}"
+
+            print(f"Progress: {total_processed}/{total_to_process} ({progress_pct:.2f}%)")
+            print(f"Avg Speed: {1/avg_time_per_entry:.2f} entries/sec | ETC: {etc_str}")
             
             # Small delay to keep the local machine responsive
             time.sleep(1.0) 
