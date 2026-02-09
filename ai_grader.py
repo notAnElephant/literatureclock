@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-BATCH_SIZE = 5 # Very small batch for maximum compatibility
+BATCH_SIZE = 20
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # LM Studio Configuration
