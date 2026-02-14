@@ -5,11 +5,16 @@ export async function GET() {
     try {
         const result = await sql`
             SELECT 
-                (SELECT COUNT(*) FROM entries WHERE is_literature = true) as total_entries,
-                (SELECT COUNT(DISTINCT v.entry_id) 
-                 FROM votes v 
-                 JOIN entries e ON v.entry_id = e.id 
-                 WHERE e.is_literature = true) as voted_entries,
+                (SELECT COUNT(*) FROM entries e 
+                 WHERE is_literature = true 
+                 AND ai_checked = true 
+                 AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.entry_id = e.id AND v.corrected_time = 'AI_DENY')
+                ) as total_entries,
+                (SELECT COUNT(*) FROM entries e 
+                 WHERE is_literature = true 
+                 AND ai_checked = true 
+                 AND EXISTS (SELECT 1 FROM votes v WHERE v.entry_id = e.id AND v.rating > 0)
+                ) as voted_entries,
                 (SELECT AVG(v.rating) 
                  FROM votes v 
                  JOIN entries e ON v.entry_id = e.id 
