@@ -13,12 +13,17 @@ export async function GET() {
                 (SELECT COUNT(*) FROM entries e 
                  WHERE is_literature = true 
                  AND ai_checked = true 
-                 AND EXISTS (SELECT 1 FROM votes v WHERE v.entry_id = e.id AND v.rating > 0)
+                 AND EXISTS (SELECT 1 FROM votes v WHERE v.entry_id = e.id AND v.rating > 0 AND v.corrected_time IS NULL)
+                 AND NOT EXISTS (SELECT 1 FROM votes v2 WHERE v2.entry_id = e.id AND v2.corrected_time = 'AI_DENY')
                 ) as voted_entries,
                 (SELECT AVG(v.rating) 
                  FROM votes v 
                  JOIN entries e ON v.entry_id = e.id 
-                 WHERE v.rating > 0 AND e.is_literature = true) as average_rating
+                 WHERE v.rating > 0 
+                 AND e.is_literature = true
+                 AND v.corrected_time IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM votes v2 WHERE v2.entry_id = e.id AND v2.corrected_time = 'AI_DENY')
+                ) as average_rating
         `;
         
         const stats = {

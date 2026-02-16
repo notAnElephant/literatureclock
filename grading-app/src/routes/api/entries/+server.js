@@ -5,6 +5,32 @@ export async function GET() {
     try {
         let entry = null;
         let attempts = 0;
+        let isReGrade = false;
+
+        // 10% chance to fetch an entry previously denied by AI
+        if (Math.random() < 0.1) {
+            const reGradeResult = await sql`
+                SELECT e.* FROM entries e
+                WHERE e.is_literature = true
+                AND e.ai_checked = true
+                AND EXISTS (
+                    SELECT 1 FROM votes v 
+                    WHERE v.entry_id = e.id 
+                    AND v.corrected_time = 'AI_DENY'
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM votes v2 
+                    WHERE v2.entry_id = e.id 
+                    AND (v2.corrected_time IS NULL OR v2.corrected_time != 'AI_DENY')
+                )
+                ORDER BY RANDOM()
+                LIMIT 1
+            `;
+            if (reGradeResult.length > 0) {
+                entry = reGradeResult[0];
+                isReGrade = true;
+            }
+        }
         
         // Find a valid entry, auto-denying bad ones
         while (!entry && attempts < 20) {
@@ -43,7 +69,7 @@ export async function GET() {
             return json({ error: "No valid entries available" }, { status: 404 });
         }
 
-        return json(entry);
+        return json({ ...entry, is_re_grade: isReGrade });
     } catch (e) {
         console.error("DB Error:", e);
         return json({ error: "Database connection failed" }, { status: 500 });

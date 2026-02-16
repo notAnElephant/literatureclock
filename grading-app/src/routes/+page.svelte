@@ -188,11 +188,30 @@
                             </button>
                         {/if}
                     </div>
+                    {#if entry.is_re_grade}
+                        <span class="bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-tighter animate-pulse">Re-grading</span>
+                    {/if}
                     <a href={entry.link} target="_blank" class="text-xs text-blue-300 underline">View Source</a>
                 </div>
 
                 <!-- Scrollable Snippet Content (Middle) -->
                 <div class="flex-1 p-6 overflow-y-auto flex flex-col justify-center bg-gray-50/30">
+                    {#if entry.ai_rating !== null || entry.ai_reason}
+                        <div class="mb-4 p-2 {entry.is_re_grade ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-100'} border rounded-lg text-left shadow-sm">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-[10px] font-bold {entry.is_re_grade ? 'text-red-400' : 'text-blue-400'} uppercase tracking-tight">
+                                    {entry.is_re_grade ? 'AI REJECTION' : 'AI Assessment'}
+                                </span>
+                                {#if entry.ai_rating !== null}
+                                    <span class="text-xs font-bold {entry.is_re_grade ? 'text-red-600' : 'text-blue-600'}">{entry.ai_rating}/5 ★</span>
+                                {/if}
+                            </div>
+                            {#if entry.ai_reason}
+                                <p class="text-[11px] {entry.is_re_grade ? 'text-red-800' : 'text-blue-800'} leading-tight italic">"{entry.ai_reason}"</p>
+                            {/if}
+                        </div>
+                    {/if}
+                    
                     <div class="prose prose-lg text-gray-800 text-center leading-relaxed">
                         {@html entry.snippet}
                     </div>

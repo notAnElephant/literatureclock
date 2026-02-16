@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-BATCH_SIZE = 20
+BATCH_SIZE = 5
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # LM Studio Configuration
@@ -84,10 +84,18 @@ def get_unchecked_entries(cur, limit):
     """, (limit,))
     return cur.fetchall()
 
-def mark_as_checked(cur, ids):
-    if not ids: return
-    query = "UPDATE entries SET ai_checked = TRUE WHERE id IN %s"
-    cur.execute(query, (tuple(ids),))
+def mark_as_checked(cur, results):
+    if not results: return
+    
+    # Update entries with rating and reason
+    for r in results:
+        cur.execute("""
+            UPDATE entries 
+            SET ai_checked = TRUE, 
+                ai_rating = %s, 
+                ai_reason = %s 
+            WHERE id = %s
+        """, (r.get('rate'), r.get('reason'), r['id']))
 
 def insert_deny_votes(cur, denials):
     if not denials: return
@@ -98,24 +106,43 @@ def insert_deny_votes(cur, denials):
         VALUES %s
     """, values)
 
+def strip_html(text):
+    if not text: return ""
+    # Remove <span class="marked"> and similar tags but keep content
+    clean = re.sub(r'<[^>]*>', '', text)
+    return clean
+
 def process_batch(cur, entries):
     global total_input_tokens, total_output_tokens
     # Prepare data
     input_data = []
+    longest_entry = None
+    max_length = -1
+
     for e in entries:
         # e = (id, title, snippet, valid_times)
         
-        # Truncate snippet to 800 characters for context safety
-        snippet = e[2] or ""
-        if len(snippet) > 800:
-            snippet = snippet[:800] + "..."
+        # Preprocess snippet: strip HTML and truncate
+        raw_snippet = e[2] or ""
+        clean_snippet = strip_html(raw_snippet)
+        
+        current_length = len(clean_snippet)
+        if current_length > max_length:
+            max_length = current_length
+            longest_entry = {"id": e[0], "title": e[1], "length": current_length}
+
+        if len(clean_snippet) > 780:
+            clean_snippet = clean_snippet[:780] + "..."
 
         input_data.append({
             "id": e[0],
             "title": e[1],
-            "snippet": snippet,
+            "snippet": clean_snippet,
             "matched_time": e[3]
         })
+
+    if longest_entry:
+        print(f"  -> Longest in batch: ID {longest_entry['id']}, Length: {longest_entry['length']}, Title: {longest_entry['title']}")
 
     prompt = PROMPT_TEMPLATE.format(data=json.dumps(input_data, ensure_ascii=False))
 
@@ -123,7 +150,7 @@ def process_batch(cur, entries):
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": "You are a strict data cleaner. Respond only with JSON."},
+                {"role": "system", "content": "You are a strict data cleaner. Respond only with JSON. The snippet provided has been pre-cleaned of HTML tags."},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -135,6 +162,7 @@ def process_batch(cur, entries):
         total_output_tokens += output_token_count
 
         content = response.choices[0].message.content
+        print(f"  -> AI Raw Response:\n{content}\n")
         # Local models sometimes wrap JSON in code blocks
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
@@ -161,15 +189,20 @@ def process_batch(cur, entries):
     denials = [r for r in results if r.get('status') == 'DENY']
     keeps = [r for r in results if r.get('status') == 'KEEP']
     
-    all_ids = [e[0] for e in entries]
-
     print(f"  -> AI Decision: {len(denials)} DENY, {len(keeps)} KEEP")
     print(f"  -> Tokens: Input +{input_token_count}, Output +{output_token_count}")
     print(f"  -> Total Tokens: {total_input_tokens + total_output_tokens}")
 
     # DB Updates
     insert_deny_votes(cur, denials)
-    mark_as_checked(cur, all_ids)
+    mark_as_checked(cur, results)
+
+    # Log to file
+    with open("grader.log", "a", encoding="utf-8") as f:
+        f.write(f"Batch: {len(entries)} entries | Input: {input_token_count} | Output: {output_token_count} | Total: {input_token_count + output_token_count}\n")
+        if longest_entry:
+            f.write(f"  Longest: ID {longest_entry['id']}, {longest_entry['length']} chars\n")
+
     return True # Signal success
 
 def main():
@@ -236,6 +269,18 @@ def main():
         print(f"\nCritical Error: {e}")
         conn.rollback()
     finally:
+        # Final Summary
+        duration = time.time() - start_time
+        print("\n" + "="*30)
+        print("FINAL SESSION SUMMARY")
+        print("="*30)
+        print(f"Entries Processed: {total_processed}")
+        print(f"Total Time:        {duration:.2f}s")
+        print(f"Total Input Tokens:  {total_input_tokens}")
+        print(f"Total Output Tokens: {total_output_tokens}")
+        print(f"Total Tokens Used:   {total_input_tokens + total_output_tokens}")
+        print("="*30)
+        
         cur.close()
         conn.close()
 
