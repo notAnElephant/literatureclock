@@ -4,7 +4,7 @@ import time
 import re
 import psycopg2
 from psycopg2.extras import execute_values
-from openai import OpenAI
+from openai import OpenAI, APITimeoutError, APIConnectionError
 from typing import List, Dict
 from dotenv import load_dotenv
 
@@ -14,6 +14,8 @@ load_dotenv()
 # Configuration
 BATCH_SIZE = 5
 DATABASE_URL = os.environ.get('DATABASE_URL')
+MAX_RETRIES = 3
+TIMEOUT_SECONDS = BATCH_SIZE * 30
 
 # LM Studio Configuration
 LM_STUDIO_BASE_URL = os.environ.get('LM_STUDIO_BASE_URL', "http://localhost:1234/v1")
@@ -146,45 +148,66 @@ def process_batch(cur, entries):
 
     prompt = PROMPT_TEMPLATE.format(data=json.dumps(input_data, ensure_ascii=False))
 
-    try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "You are a strict data cleaner. Respond only with JSON. The snippet provided has been pre-cleaned of HTML tags."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        # Get usage metadata
-        input_token_count = response.usage.prompt_tokens
-        output_token_count = response.usage.completion_tokens
-        total_input_tokens += input_token_count
-        total_output_tokens += output_token_count
-
-        content = response.choices[0].message.content
-        print(f"  -> AI Raw Response:\n{content}\n")
-        # Local models sometimes wrap JSON in code blocks
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
+    results = []
+    input_token_count = 0
+    output_token_count = 0
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a strict data cleaner. Respond only with JSON. The snippet provided has been pre-cleaned of HTML tags."},
+                    {"role": "user", "content": prompt}
+                ],
+                timeout=TIMEOUT_SECONDS
+            )
             
-        results_data = json.loads(content)
-        # Handle both list and object with list formats
-        if isinstance(results_data, dict):
-            # Try to find a list within the dict if it's not a list itself
-            for key in results_data:
-                if isinstance(results_data[key], list):
-                    results = results_data[key]
-                    break
-            else:
-                results = [] # Fallback
-        else:
-            results = results_data
+            # Get usage metadata
+            input_token_count = response.usage.prompt_tokens
+            output_token_count = response.usage.completion_tokens
+            total_input_tokens += input_token_count
+            total_output_tokens += output_token_count
 
-    except Exception as e:
-        print(f"  -> LM Studio Error: {e}")
-        return False # Signal failure
+            content = response.choices[0].message.content
+            print(f"  -> AI Raw Response:\n{content}\n")
+            # Local models sometimes wrap JSON in code blocks
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+                
+            results_data = json.loads(content)
+            # Handle both list and object with list formats
+            if isinstance(results_data, dict):
+                # Try to find a list within the dict if it's not a list itself
+                for key in results_data:
+                    if isinstance(results_data[key], list):
+                        results = results_data[key]
+                        break
+                else:
+                    results = [] # Fallback
+            else:
+                results = results_data
+            
+            # If we reached here, success!
+            break
+
+        except (APITimeoutError, APIConnectionError) as e:
+            wait_time = (attempt + 1) * 5
+            print(f"  -> LM Studio Timeout/Connection Error (Attempt {attempt+1}/{MAX_RETRIES}): {e}")
+            if attempt < MAX_RETRIES - 1:
+                print(f"     Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                with open("grader_errors.log", "a", encoding="utf-8") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} | CRITICAL: All {MAX_RETRIES} retries failed for batch starting with ID {entries[0][0]}\n")
+                return False
+        except Exception as e:
+            print(f"  -> Unexpected Error: {e}")
+            with open("grader_errors.log", "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} | Error: {str(e)} for batch starting with ID {entries[0][0]}\n")
+            return False
 
     denials = [r for r in results if r.get('status') == 'DENY']
     keeps = [r for r in results if r.get('status') == 'KEEP']
