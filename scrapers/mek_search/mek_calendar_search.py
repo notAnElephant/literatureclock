@@ -3,6 +3,7 @@ import json
 import logging
 import random
 import re
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -264,6 +265,7 @@ def main():
                 search_queue = remaining_terms
 
         logging.info(f"Starting search for {len(search_queue)} date terms...")
+        start_time = time.time()
 
         with open(args.output, 'a', encoding='utf-8') as f:
             for i, term in enumerate(search_queue):
@@ -283,6 +285,20 @@ def main():
                     }
                     f.write(json.dumps(no_match_record, ensure_ascii=False) + "\n")
                 f.flush()
+
+                done = i + 1
+                total = len(search_queue)
+                percent = (done / total) * 100 if total else 100.0
+                elapsed = time.time() - start_time
+                speed = done / elapsed if elapsed > 0 else 0.0
+                remaining = total - done
+                eta_seconds = int(remaining / speed) if speed > 0 else 0
+                eta_h, rem = divmod(eta_seconds, 3600)
+                eta_m, eta_s = divmod(rem, 60)
+                logging.info(
+                    f"Progress: {done}/{total} ({percent:.2f}%) | "
+                    f"Speed: {speed:.2f} terms/s | ETA: {eta_h:02d}:{eta_m:02d}:{eta_s:02d}"
+                )
     finally:
         searcher.close()
 
