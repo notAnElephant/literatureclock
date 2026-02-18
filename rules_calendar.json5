@@ -4,7 +4,8 @@
   "strict": true,
   "notes": [
     "Search terms for literary date extraction from MEK fulltext search.",
-    "Month names include accented and de-accented variants for OCR robustness."
+    "Month names include accented and de-accented variants for OCR robustness.",
+    "Special terms may be mapped to a fixed MM-DD when applicable; movable feasts can have empty valid_dates."
   ],
   "months": [
     { "num": 1, "forms": ["január", "januar", "jan."] },
@@ -25,6 +26,46 @@
     "YYYY.MM.DD",
     "YYYY. MM. DD.",
     "DD.MM.YYYY",
-    "MM.DD."
+    "MM.DD.",
+    "DD.MM.",
+    "DD. MM.",
+    "DD-MM",
+    "DD/MM"
+  ],
+  "special_terms": [
+    { "term": "január elseje", "valid_dates": ["01-01"] },
+    { "term": "január elsején", "valid_dates": ["01-01"] },
+    { "term": "január első napján", "valid_dates": ["01-01"] },
+    { "term": "január hónapnak első napján", "valid_dates": ["01-01"] },
+    { "term": "az év első napján", "valid_dates": ["01-01"] },
+    { "term": "az új év első napján", "valid_dates": ["01-01"] },
+    { "term": "újévkor", "valid_dates": ["01-01"] },
+    { "term": "vízkeresztkor", "valid_dates": ["01-06"] },
+    { "term": "vízkereszt napján", "valid_dates": ["01-06"] },
+    { "term": "valentin-napon", "valid_dates": ["02-14"] },
+    { "term": "nőnapon", "valid_dates": ["03-08"] },
+    { "term": "anyák napja", "valid_dates": [] },
+    { "term": "anyák napján", "valid_dates": [] },
+    { "term": "apák napja", "valid_dates": [] },
+    { "term": "apák napján", "valid_dates": [] },
+    { "term": "húsvétkor", "valid_dates": [] },
+    { "term": "nagypénteken", "valid_dates": [] },
+    { "term": "húsvétvasárnap", "valid_dates": [] },
+    { "term": "húsvéthétfőn", "valid_dates": [] },
+    { "term": "pünkösdkor", "valid_dates": [] },
+    { "term": "pünkösd napján", "valid_dates": [] },
+    { "term": "pünkösd vasárnapján", "valid_dates": [] },
+    { "term": "gyermeknapon", "valid_dates": [] },
+    { "term": "halottak napján", "valid_dates": ["11-02"] },
+    { "term": "hallowe'enkor", "valid_dates": ["10-31"] },
+    { "term": "halloweenkor", "valid_dates": ["10-31"] },
+    { "term": "advent első napján", "valid_dates": [] },
+    { "term": "mikulás napján", "valid_dates": ["12-06"] },
+    { "term": "szenteste", "valid_dates": ["12-24"] },
+    { "term": "karácsony első napján", "valid_dates": ["12-25"] },
+    { "term": "karácsony második napján", "valid_dates": ["12-26"] },
+    { "term": "karácsony másnapján", "valid_dates": ["12-26"] },
+    { "term": "szilveszterkor", "valid_dates": ["12-31"] },
+    { "term": "szilveszter napján", "valid_dates": ["12-31"] }
   ]
 }

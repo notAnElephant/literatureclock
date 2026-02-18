@@ -34,6 +34,7 @@ class DateTermGenerator:
         self.rules = rules
         self.months = rules.get('months', [])
         self.day_suffixes = rules.get('day_suffixes', ['.'])
+        self.special_terms = rules.get('special_terms', [])
 
     def generate_terms(self):
         term_to_dates = defaultdict(set)
@@ -55,11 +56,27 @@ class DateTermGenerator:
                 term_to_dates[f"{month_num:02}.{day:02}."].add(date_mmdd)
                 term_to_dates[f"{day}.{month_num}."].add(date_mmdd)
                 term_to_dates[f"{day:02}.{month_num:02}."].add(date_mmdd)
+                term_to_dates[f"{day:02}.{month_num:02}."].add(date_mmdd)
+                term_to_dates[f"{day:02}. {month_num:02}."].add(date_mmdd)
+                term_to_dates[f"{day:02}-{month_num:02}"].add(date_mmdd)
+                term_to_dates[f"{day:02}/{month_num:02}"].add(date_mmdd)
 
                 # Numeric variants with common placeholder year patterns
                 term_to_dates[f"2015. {month_num:02}. {day:02}."].add(date_mmdd)
                 term_to_dates[f"2011.{month_num:02}.{day:02}"].add(date_mmdd)
                 term_to_dates[f"{day:02}.{month_num:02}.2015"].add(date_mmdd)
+
+        for item in self.special_terms:
+            term = item.get('term')
+            mapped_dates = item.get('valid_dates', [])
+            if not term:
+                continue
+            if mapped_dates:
+                for mapped in mapped_dates:
+                    term_to_dates[term].add(mapped)
+            else:
+                # Keep term searchable even if date is movable/unspecified.
+                term_to_dates[term]
 
         return term_to_dates
 
