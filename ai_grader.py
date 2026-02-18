@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-BATCH_SIZE = 2
+BATCH_SIZE = 8
 DATABASE_URL = os.environ.get('DATABASE_URL')
 MAX_RETRIES = 3
 TIMEOUT_SECONDS = BATCH_SIZE * 30
@@ -74,16 +74,24 @@ Your goal is to filter out invalid entries found by a scraper.
 
 The scraper looked for time patterns (e.g. "12:30", "negyed három"), but it found many false positives.
 The text is in Hungarian.
+Important: The snippet may contain `<span class="marked">...</span>` around tokens matched by the scraper.
+These exact tags indicate the anchor of the candidate time expression.
 
 Criteria for DENYING an entry (marking it as bad):
 1. **Not a Time**: The matching text refers to a date (e.g., "11/12" meaning Nov 12th), a quantity, a price, or a chapter number, NOT a time of day.
 2. **Meta-text**: The snippet is a Table of Contents, a header, a footnote, or a bibliography, not a narrative sentence.
 3. **Comment**: The data is not of the highest quality, it may include comments made on the book, not just the book's core text.
 4. **Gibberish**: The snippet is broken, unreadable, or just a list of numbers.
+5. **File/OCR metadata**: Filename/index artifacts like `.indd`, `.jpg`, page/index dumps, or dense timestamp logs.
 
 Criteria for KEEPING:
 1. It is a valid sentence from a book, or it is a diary's timestamp
-2. It refers to a specific time of day.
+2. It refers to a specific time of day, especially around `<span class="marked">...</span>`.
+
+Prioritization rules:
+- Judge primarily by the local context around `<span class="marked">...</span>`.
+- If marker context is clearly metadata/listing noise, DENY.
+- If marker context is natural narrative time-of-day usage, KEEP.
 
 Input Data (JSON):
 {data}
@@ -156,8 +164,24 @@ def clear_ai_deny_votes(cur, entry_ids):
 
 def strip_html(text):
     if not text: return ""
-    # Remove <span class="marked"> and similar tags but keep content
-    clean = re.sub(r'<[^>]*>', '', text)
+    # Preserve exact scraper markers (<span class="marked">...</span>) and strip every other tag.
+    preserved_spans = []
+    def keep_marked_span(match):
+        preserved_spans.append(match.group(0))
+        return f"__MARKED_SPAN_{len(preserved_spans)-1}__"
+
+    with_placeholders = re.sub(
+        r'<span\s+class="marked">.*?</span>',
+        keep_marked_span,
+        text,
+        flags=re.DOTALL
+    )
+
+    clean = re.sub(r'<[^>]*>', '', with_placeholders)
+
+    for i, original_span in enumerate(preserved_spans):
+        clean = clean.replace(f"__MARKED_SPAN_{i}__", original_span)
+
     return clean
 
 def estimate_call_cost_usd(input_tokens, output_tokens):
@@ -271,6 +295,13 @@ def process_batch(cur, entries):
 
     denials = [r for r in results if r.get('status') == 'DENY']
     keeps = [r for r in results if r.get('status') == 'KEEP']
+
+    # Debug: always print last item input/output in each batch
+    if input_data:
+        last_input = input_data[-1]
+        last_output = next((r for r in results if r.get('id') == last_input.get('id')), None)
+        print(f"  -> Last Item Input: {json.dumps(last_input, ensure_ascii=False)}")
+        print(f"  -> Last Item Output: {json.dumps(last_output, ensure_ascii=False) if last_output else 'NO_OUTPUT_MATCH'}")
     
     print(f"  -> AI Decision: {len(denials)} DENY, {len(keeps)} KEEP")
     print(f"  -> Tokens: Input +{input_token_count}, Output +{output_token_count}")
