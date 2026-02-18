@@ -1,5 +1,5 @@
 <script>
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import { fade, fly, slide } from 'svelte/transition';
 
     let entry = null;
@@ -9,6 +9,7 @@
     let error = null;
     let stats = { total_entries: 0, voted_entries: 0, average_rating: 0 };
     let hasVotedRating = false;
+    let snippetContainer;
     
     // Time Correction
     let correctedTime = '';
@@ -43,6 +44,10 @@
                 const data = await res.json();
                 if (data && !data.error) {
                     entry = data;
+                    await tick();
+                    if (snippetContainer) {
+                        snippetContainer.scrollTop = 0;
+                    }
                 } else {
                     error = data?.error || "No entry found";
                 }
@@ -166,36 +171,40 @@
         {:else if entry}
             <div in:fade={{ duration: 200 }} out:fly={{ x: -200, duration: 300 }} class="absolute inset-0 bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col">
                 <!-- Card Header (Pinned) -->
-                <div class="bg-gray-800 text-white p-4 text-center flex justify-between items-center shrink-0">
-                    <div class="flex items-center">
-                        {#if isEditingTime}
-                            <input 
-                                type="time" 
-                                bind:value={correctedTime} 
-                                class="bg-gray-700 text-white font-mono font-bold text-xl w-32 px-2 py-1 rounded border border-gray-500 focus:outline-none focus:border-blue-400 text-center"
-                            />
-                            <button on:click={() => isEditingTime = false} class="ml-2 text-gray-400 hover:text-white">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
-                            </button>
-                        {:else}
-                            <button 
-                                on:click={() => { isEditingTime = true; correctedTime = formatTimeForInput(entry.valid_times ? entry.valid_times[0] : ''); }} 
-                                class="text-2xl font-mono font-bold hover:text-blue-300 transition-colors flex items-center gap-2 group"
-                                title="Click to correct time"
-                            >
-                                {entry.valid_times ? entry.valid_times[0] : '??:??'}
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                            </button>
-                        {/if}
+                <div class="bg-gray-800 text-white p-4 shrink-0 space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center min-w-0 flex-1">
+                            {#if isEditingTime}
+                                <input 
+                                    type="time" 
+                                    bind:value={correctedTime} 
+                                    class="bg-gray-700 text-white font-mono font-bold text-xl w-32 px-2 py-1 rounded border border-gray-500 focus:outline-none focus:border-blue-400 text-center"
+                                />
+                                <button on:click={() => isEditingTime = false} class="ml-2 text-gray-400 hover:text-white">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+                                </button>
+                            {:else}
+                                <button 
+                                    on:click={() => { isEditingTime = true; correctedTime = formatTimeForInput(entry.valid_times ? entry.valid_times[0] : ''); }} 
+                                    class="text-2xl font-mono font-bold hover:text-blue-300 transition-colors flex items-center gap-2 group min-w-0"
+                                    title="Click to correct time"
+                                >
+                                    <span class="truncate">{entry.valid_times ? entry.valid_times[0] : '??:??'}</span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                </button>
+                            {/if}
+                        </div>
+                        <a href={entry.link} target="_blank" class="text-xs text-blue-300 underline shrink-0">View Source</a>
                     </div>
                     {#if entry.is_re_grade}
-                        <span class="bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-tighter animate-pulse">Re-grading</span>
+                        <div>
+                            <span class="inline-flex bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-tighter animate-pulse">Re-grading</span>
+                        </div>
                     {/if}
-                    <a href={entry.link} target="_blank" class="text-xs text-blue-300 underline">View Source</a>
                 </div>
 
                 <!-- Scrollable Snippet Content (Middle) -->
-                <div class="flex-1 p-6 overflow-y-auto flex flex-col justify-center bg-gray-50/30">
+                <div bind:this={snippetContainer} class="flex-1 p-6 overflow-y-auto flex flex-col justify-start bg-gray-50/30">
                     {#if entry.ai_rating !== null || entry.ai_reason}
                         <div class="mb-4 p-2 {entry.is_re_grade ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-100'} border rounded-lg text-left shadow-sm">
                             <div class="flex justify-between items-center mb-1">
