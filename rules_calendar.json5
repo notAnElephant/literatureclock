@@ -1,0 +1,30 @@
+{
+  "locale": "hu",
+  "version": 1,
+  "strict": true,
+  "notes": [
+    "Search terms for literary date extraction from MEK fulltext search.",
+    "Month names include accented and de-accented variants for OCR robustness."
+  ],
+  "months": [
+    { "num": 1, "forms": ["január", "januar", "jan."] },
+    { "num": 2, "forms": ["február", "februar", "febr.", "feb."] },
+    { "num": 3, "forms": ["március", "marcius", "márc.", "marc.", "márc", "marc"] },
+    { "num": 4, "forms": ["április", "aprilis", "ápr.", "apr.", "ápr", "apr"] },
+    { "num": 5, "forms": ["május", "majus", "máj.", "maj.", "máj", "maj"] },
+    { "num": 6, "forms": ["június", "junius", "jún.", "jun.", "jún", "jun"] },
+    { "num": 7, "forms": ["július", "julius", "júl.", "jul.", "júl", "jul"] },
+    { "num": 8, "forms": ["augusztus", "aug.", "aug"] },
+    { "num": 9, "forms": ["szeptember", "szept.", "szept", "szep.", "szep"] },
+    { "num": 10, "forms": ["október", "oktober", "okt.", "okt"] },
+    { "num": 11, "forms": ["november", "nov.", "nov"] },
+    { "num": 12, "forms": ["december", "dec.", "dec"] }
+  ],
+  "day_suffixes": [".", "-án", "-én", "-n", "-ai", "-ei", ""],
+  "numeric_patterns": [
+    "YYYY.MM.DD",
+    "YYYY. MM. DD.",
+    "DD.MM.YYYY",
+    "MM.DD."
+  ]
+}

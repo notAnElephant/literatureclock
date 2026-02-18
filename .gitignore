@@ -5,3 +5,5 @@
 /grader.log
 
 .env
+
+__pycache__/

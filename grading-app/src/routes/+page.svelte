@@ -5,20 +5,35 @@
     let entry = null;
     let loading = true;
     let rating = 0;
-    let timeClass = null; // 'am', 'pm', 'ambiguous'
+    let timeClass = null; // time: 'am','pm','ambiguous' | date: 'exact','relative','ambiguous'
     let error = null;
     let stats = { total_entries: 0, voted_entries: 0, average_rating: 0 };
     let hasVotedRating = false;
     let snippetContainer;
+    let dataset = 'time'; // 'time' | 'date'
     
     // Time Correction
     let correctedTime = '';
     let isEditingTime = false;
     let isMetaExpanded = false;
 
+    const CLASS_OPTIONS = {
+        time: ['am', 'pm', 'ambiguous'],
+        date: ['exact', 'relative', 'ambiguous']
+    };
+    function getClassOptions() {
+        return dataset === 'date' ? CLASS_OPTIONS.date : CLASS_OPTIONS.time;
+    }
+
+    function getExpectedValue(currentEntry) {
+        if (!currentEntry) return '';
+        if (dataset === 'date') return currentEntry.valid_dates ? currentEntry.valid_dates[0] : '';
+        return currentEntry.valid_times ? currentEntry.valid_times[0] : '';
+    }
+
     async function fetchStats() {
         try {
-            const res = await fetch('/api/stats');
+            const res = await fetch(`/api/stats?dataset=${dataset}`);
             if (res.ok) {
                 stats = await res.json();
             }
@@ -39,7 +54,7 @@
         correctedTime = '';
         
         try {
-            const res = await fetch('/api/entries');
+            const res = await fetch(`/api/entries?dataset=${dataset}`);
             if (res.ok) {
                 const data = await res.json();
                 if (data && !data.error) {
@@ -68,7 +83,7 @@
             // No validation needed for deny
         } else {
             if (!timeClass) {
-                alert("Please select AM, PM, or Ambiguous");
+                alert(dataset === 'date' ? "Please select Exact, Relative, or Ambiguous" : "Please select AM, PM, or Ambiguous");
                 return;
             }
             if (rating === 0) {
@@ -81,13 +96,17 @@
         const finalTimeClass = isDeny ? (timeClass || 'ambiguous') : timeClass;
         
         // Use corrected time if provided and editing was active or value exists
-        const finalTime = (correctedTime && correctedTime !== entry.valid_times[0]) ? correctedTime : null;
+        const expectedValue = getExpectedValue(entry);
+        const finalTime = (correctedTime && correctedTime !== expectedValue) ? correctedTime : null;
 
         const voteData = { 
             entry_id: entry.id, 
             rating: finalRating, 
             am_pm: finalTimeClass,
-            corrected_time: finalTime
+            corrected_time: finalTime,
+            class_value: finalTimeClass,
+            corrected_value: finalTime,
+            dataset
         };
         
         fetchEntry();
@@ -115,6 +134,7 @@
 
     function formatTimeForInput(timeStr) {
         if (!timeStr) return '';
+        if (dataset === 'date') return timeStr;
         // Ensure HH:MM format (pad hour with 0 if needed)
         const parts = timeStr.split(':');
         if (parts.length === 2) {
@@ -124,11 +144,27 @@
     }
 
     onMount(() => {
+        const params = new URLSearchParams(window.location.search);
+        const requestedDataset = params.get('dataset');
+        if (requestedDataset === 'date') {
+            dataset = 'date';
+        }
         fetchStats();
         fetchEntry();
     });
 
     $: progress = stats.total_entries > 0 ? (stats.voted_entries / stats.total_entries) * 100 : 0;
+
+    function setDataset(nextDataset) {
+        if (nextDataset !== 'time' && nextDataset !== 'date') return;
+        if (dataset === nextDataset) return;
+        dataset = nextDataset;
+        const params = new URLSearchParams(window.location.search);
+        params.set('dataset', nextDataset);
+        window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+        fetchStats();
+        fetchEntry();
+    }
 </script>
 
 <style>
@@ -145,6 +181,20 @@
 <div class="min-h-screen bg-gray-100 flex flex-col items-center p-4">
     <!-- Sticky Stats Bar -->
     <div class="sticky top-0 z-50 w-full max-w-md mb-4 bg-white rounded-xl shadow-md p-4 border-b-2 border-blue-500">
+        <div class="grid grid-cols-2 gap-2 mb-3">
+            <button
+                class="py-2 text-xs font-bold rounded-lg uppercase border-2 transition-all {dataset === 'time' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-500'}"
+                on:click={() => setDataset('time')}
+            >
+                Time Mode
+            </button>
+            <button
+                class="py-2 text-xs font-bold rounded-lg uppercase border-2 transition-all {dataset === 'date' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-500'}"
+                on:click={() => setDataset('date')}
+            >
+                Date Mode
+            </button>
+        </div>
         <div class="flex justify-between text-sm font-bold text-gray-700 mb-2">
             <span>Progress: {stats.voted_entries} / {stats.total_entries}</span>
             <span>{progress.toFixed(2)}%</span>
@@ -176,20 +226,21 @@
                         <div class="flex items-center min-w-0 flex-1">
                             {#if isEditingTime}
                                 <input 
-                                    type="time" 
+                                    type={dataset === 'date' ? 'text' : 'time'}
                                     bind:value={correctedTime} 
-                                    class="bg-gray-700 text-white font-mono font-bold text-xl w-32 px-2 py-1 rounded border border-gray-500 focus:outline-none focus:border-blue-400 text-center"
+                                    placeholder={dataset === 'date' ? 'YYYY.MM.DD' : ''}
+                                    class="bg-gray-700 text-white font-mono font-bold text-xl {dataset === 'date' ? 'w-44' : 'w-32'} px-2 py-1 rounded border border-gray-500 focus:outline-none focus:border-blue-400 text-center"
                                 />
                                 <button on:click={() => isEditingTime = false} class="ml-2 text-gray-400 hover:text-white">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
                                 </button>
                             {:else}
                                 <button 
-                                    on:click={() => { isEditingTime = true; correctedTime = formatTimeForInput(entry.valid_times ? entry.valid_times[0] : ''); }} 
+                                    on:click={() => { isEditingTime = true; correctedTime = formatTimeForInput(getExpectedValue(entry)); }} 
                                     class="text-2xl font-mono font-bold hover:text-blue-300 transition-colors flex items-center gap-2 group min-w-0"
-                                    title="Click to correct time"
+                                    title={dataset === 'date' ? 'Click to correct date' : 'Click to correct time'}
                                 >
-                                    <span class="truncate">{entry.valid_times ? entry.valid_times[0] : '??:??'}</span>
+                                    <span class="truncate">{getExpectedValue(entry) || (dataset === 'date' ? '????.??.??' : '??:??')}</span>
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                 </button>
                             {/if}
@@ -264,9 +315,9 @@
                 <!-- Controls (Compact) -->
                 <div class="bg-gray-50 p-2 border-t border-gray-200 space-y-2 shrink-0">
                     
-                    <!-- Time Classification -->
+                    <!-- Classification -->
                     <div class="grid grid-cols-3 gap-2">
-                        {#each ['am', 'pm', 'ambiguous'] as t}
+                        {#each getClassOptions() as t}
                             <button 
                                 class="py-2 px-1 text-xs font-bold rounded-lg uppercase border-2 transition-all
                                 {timeClass === t 
