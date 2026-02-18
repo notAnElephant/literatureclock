@@ -3,3 +3,5 @@
 /hits.jsonl
 /scrapers/mek_search/mek_search_results.jsonl
 /grader.log
+
+.env

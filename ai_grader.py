@@ -16,37 +16,57 @@ BATCH_SIZE = 2
 DATABASE_URL = os.environ.get('DATABASE_URL')
 MAX_RETRIES = 3
 TIMEOUT_SECONDS = BATCH_SIZE * 30
+BUDGET_USD = float(os.environ.get('BUDGET_USD', '2.0'))
+RE_GRADE_AI_ONLY = os.environ.get('RE_GRADE_AI_ONLY', 'true').strip().lower() in ('1', 'true', 'yes')
+RESET_AI_CHECKED_FOR_REGRADE = os.environ.get('RESET_AI_CHECKED_FOR_REGRADE', 'true').strip().lower() in ('1', 'true', 'yes')
 
-# LM Studio Configuration
+# AI Provider Configuration
+AI_PROVIDER = os.environ.get('AI_PROVIDER', "lmstudio").strip().lower()
 LM_STUDIO_BASE_URL = os.environ.get('LM_STUDIO_BASE_URL', "http://localhost:1234/v1")
-DEFAULT_MODEL_NAME = os.environ.get('MODEL_NAME', "local-model")
+DEFAULT_LMSTUDIO_MODEL_NAME = os.environ.get('MODEL_NAME', "local-model")
+GEMINI_BASE_URL = os.environ.get('GEMINI_BASE_URL', "https://generativelanguage.googleapis.com/v1beta/openai/")
+GEMINI_MODEL_NAME = os.environ.get('GEMINI_MODEL', "gemini-2.5-flash")
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_FLASH_INPUT_USD_PER_M = float(os.environ.get('GEMINI_FLASH_INPUT_USD_PER_M', '0.30'))
+GEMINI_FLASH_OUTPUT_USD_PER_M = float(os.environ.get('GEMINI_FLASH_OUTPUT_USD_PER_M', '2.50'))
 
 # Global Counters
 total_input_tokens = 0
 total_output_tokens = 0
+total_cost_usd = 0.0
 
 if not DATABASE_URL:
     print("Error: DATABASE_URL is not set.")
     exit(1)
 
-# Initialize OpenAI client for LM Studio
-client = OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="lm-studio")
+def init_client_and_model():
+    if AI_PROVIDER == "gemini":
+        if not GEMINI_API_KEY:
+            print("Error: GEMINI_API_KEY is not set while AI_PROVIDER=gemini.")
+            exit(1)
+        print(f"Connecting to Gemini API at {GEMINI_BASE_URL}...")
+        client = OpenAI(base_url=GEMINI_BASE_URL, api_key=GEMINI_API_KEY)
+        model_name = GEMINI_MODEL_NAME
+        print(f"Using model: {model_name}\n")
+        return client, model_name
 
-# --- Debug: List available models ---
-print(f"Connecting to LM Studio at {LM_STUDIO_BASE_URL}...")
-MODEL_NAME = DEFAULT_MODEL_NAME
-try:
-    models = client.models.list()
-    if models.data:
-        # Use the first loaded model's ID if our default isn't found
-        available_ids = [m.id for m in models.data]
-        print(f"Available local models: {', '.join(available_ids)}")
-        if DEFAULT_MODEL_NAME not in available_ids:
-            MODEL_NAME = available_ids[0]
-except Exception as e:
-    print(f"Warning: Could not list models: {e}")
-print(f"Using model: {MODEL_NAME}\n")
-# ------------------------------------
+    # Default: LM Studio
+    print(f"Connecting to LM Studio at {LM_STUDIO_BASE_URL}...")
+    client = OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="lm-studio")
+    model_name = DEFAULT_LMSTUDIO_MODEL_NAME
+    try:
+        models = client.models.list()
+        if models.data:
+            available_ids = [m.id for m in models.data]
+            print(f"Available local models: {', '.join(available_ids)}")
+            if DEFAULT_LMSTUDIO_MODEL_NAME not in available_ids:
+                model_name = available_ids[0]
+    except Exception as e:
+        print(f"Warning: Could not list models: {e}")
+    print(f"Using model: {model_name}\n")
+    return client, model_name
+
+client, MODEL_NAME = init_client_and_model()
 
 PROMPT_TEMPLATE = """
 You are a strict data cleaner for a "Literature Clock" project. 
@@ -77,13 +97,30 @@ Return a list of objects. Each object must have, in this exact order:
 """
 
 def get_unchecked_entries(cur, limit):
-    cur.execute("""
-        SELECT id, title, snippet, valid_times 
-        FROM entries 
-        WHERE ai_checked IS FALSE 
-        AND is_literature IS TRUE
-        LIMIT %s
-    """, (limit,))
+    if RE_GRADE_AI_ONLY:
+        cur.execute("""
+            SELECT e.id, e.title, e.snippet, e.valid_times
+            FROM entries e
+            WHERE e.ai_checked IS FALSE
+              AND e.is_literature IS TRUE
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM votes v
+                  WHERE v.entry_id = e.id
+                    AND (v.corrected_time IS NULL OR v.corrected_time <> 'AI_DENY')
+              )
+            ORDER BY e.id
+            LIMIT %s
+        """, (limit,))
+    else:
+        cur.execute("""
+            SELECT id, title, snippet, valid_times
+            FROM entries
+            WHERE ai_checked IS FALSE
+              AND is_literature IS TRUE
+            ORDER BY id
+            LIMIT %s
+        """, (limit,))
     return cur.fetchall()
 
 def mark_as_checked(cur, results):
@@ -108,14 +145,30 @@ def insert_deny_votes(cur, denials):
         VALUES %s
     """, values)
 
+def clear_ai_deny_votes(cur, entry_ids):
+    if not entry_ids:
+        return
+    cur.execute("""
+        DELETE FROM votes
+        WHERE corrected_time = 'AI_DENY'
+          AND entry_id = ANY(%s)
+    """, (entry_ids,))
+
 def strip_html(text):
     if not text: return ""
     # Remove <span class="marked"> and similar tags but keep content
     clean = re.sub(r'<[^>]*>', '', text)
     return clean
 
+def estimate_call_cost_usd(input_tokens, output_tokens):
+    if AI_PROVIDER != "gemini":
+        return 0.0
+    in_cost = (input_tokens / 1_000_000) * GEMINI_FLASH_INPUT_USD_PER_M
+    out_cost = (output_tokens / 1_000_000) * GEMINI_FLASH_OUTPUT_USD_PER_M
+    return in_cost + out_cost
+
 def process_batch(cur, entries):
-    global total_input_tokens, total_output_tokens
+    global total_input_tokens, total_output_tokens, total_cost_usd
     # Prepare data
     input_data = []
     longest_entry = None
@@ -160,12 +213,14 @@ def process_batch(cur, entries):
                     {"role": "system", "content": "You are a strict data cleaner. Respond only with JSON. The snippet provided has been pre-cleaned of HTML tags."},
                     {"role": "user", "content": prompt}
                 ],
+                temperature=0,
                 timeout=TIMEOUT_SECONDS
             )
             
             # Get usage metadata
-            input_token_count = response.usage.prompt_tokens
-            output_token_count = response.usage.completion_tokens
+            if response.usage:
+                input_token_count = response.usage.prompt_tokens or 0
+                output_token_count = response.usage.completion_tokens or 0
             total_input_tokens += input_token_count
             total_output_tokens += output_token_count
 
@@ -220,14 +275,21 @@ def process_batch(cur, entries):
     print(f"  -> AI Decision: {len(denials)} DENY, {len(keeps)} KEEP")
     print(f"  -> Tokens: Input +{input_token_count}, Output +{output_token_count}")
     print(f"  -> Total Tokens: {total_input_tokens + total_output_tokens}")
+    batch_cost = estimate_call_cost_usd(input_token_count, output_token_count)
+    total_cost_usd += batch_cost
+    if AI_PROVIDER == "gemini":
+        print(f"  -> Cost: Batch ${batch_cost:.6f} | Total ${total_cost_usd:.6f} / ${BUDGET_USD:.2f}")
 
     # DB Updates
+    clear_ai_deny_votes(cur, [r['id'] for r in results if 'id' in r])
     insert_deny_votes(cur, denials)
     mark_as_checked(cur, results)
 
     # Log to file
     with open("grader.log", "a", encoding="utf-8") as f:
         f.write(f"Batch: {len(entries)} entries | Input: {input_token_count} | Output: {output_token_count} | Total: {input_token_count + output_token_count}\n")
+        if AI_PROVIDER == "gemini":
+            f.write(f"  Cost: Batch ${batch_cost:.6f} | Total ${total_cost_usd:.6f}\n")
         if longest_entry:
             f.write(f"  Longest: ID {longest_entry['id']}, {longest_entry['length']} chars\n")
 
@@ -238,8 +300,39 @@ def main():
     conn.autocommit = False # We'll commit after each batch
     cur = conn.cursor()
 
+    if RE_GRADE_AI_ONLY and RESET_AI_CHECKED_FOR_REGRADE:
+        cur.execute("""
+            UPDATE entries e
+            SET ai_checked = FALSE
+            WHERE e.is_literature IS TRUE
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM votes v
+                  WHERE v.entry_id = e.id
+                    AND (v.corrected_time IS NULL OR v.corrected_time <> 'AI_DENY')
+              )
+        """)
+        conn.commit()
+        print("Reset ai_checked=FALSE for literature entries without human (non-AI) ratings.")
+    elif RE_GRADE_AI_ONLY:
+        print("Keeping existing ai_checked flags (resume mode for prior re-grade run).")
+
     # Get total count for progress tracking
-    cur.execute("SELECT count(*) FROM entries WHERE ai_checked IS FALSE AND is_literature IS TRUE")
+    if RE_GRADE_AI_ONLY:
+        cur.execute("""
+            SELECT count(*)
+            FROM entries e
+            WHERE e.ai_checked IS FALSE
+              AND e.is_literature IS TRUE
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM votes v
+                  WHERE v.entry_id = e.id
+                    AND (v.corrected_time IS NULL OR v.corrected_time <> 'AI_DENY')
+              )
+        """)
+    else:
+        cur.execute("SELECT count(*) FROM entries WHERE ai_checked IS FALSE AND is_literature IS TRUE")
     total_to_process = cur.fetchone()[0]
     
     if total_to_process == 0:
@@ -287,6 +380,11 @@ def main():
 
             print(f"Progress: {total_processed}/{total_to_process} ({progress_pct:.2f}%)")
             print(f"Avg Speed: {1/avg_time_per_entry:.2f} entries/sec | ETC: {etc_str}")
+            if AI_PROVIDER == "gemini":
+                print(f"Cost So Far: ${total_cost_usd:.6f} / ${BUDGET_USD:.2f}")
+                if total_cost_usd >= BUDGET_USD:
+                    print("Budget limit reached. Stopping after committed batch.")
+                    break
             
             # Small delay to keep the local machine responsive
             time.sleep(1.0) 
@@ -307,6 +405,9 @@ def main():
         print(f"Total Input Tokens:  {total_input_tokens}")
         print(f"Total Output Tokens: {total_output_tokens}")
         print(f"Total Tokens Used:   {total_input_tokens + total_output_tokens}")
+        if AI_PROVIDER == "gemini":
+            print(f"Estimated Cost:      ${total_cost_usd:.6f}")
+            print(f"Budget Limit:        ${BUDGET_USD:.2f}")
         print("="*30)
         
         cur.close()
