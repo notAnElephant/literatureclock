@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-BATCH_SIZE = 5
+BATCH_SIZE = 2
 DATABASE_URL = os.environ.get('DATABASE_URL')
 MAX_RETRIES = 3
 TIMEOUT_SECONDS = BATCH_SIZE * 30
@@ -196,12 +196,17 @@ def process_batch(cur, entries):
         except (APITimeoutError, APIConnectionError) as e:
             wait_time = (attempt + 1) * 5
             print(f"  -> LM Studio Timeout/Connection Error (Attempt {attempt+1}/{MAX_RETRIES}): {e}")
+            print(f"     Problematic Input Data Summary:")
+            for item in input_data:
+                print(f"       - ID {item['id']}: {item['title']} ({len(item['snippet'])} chars)")
+            
             if attempt < MAX_RETRIES - 1:
                 print(f"     Retrying in {wait_time}s...")
                 time.sleep(wait_time)
             else:
                 with open("grader_errors.log", "a", encoding="utf-8") as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} | CRITICAL: All {MAX_RETRIES} retries failed for batch starting with ID {entries[0][0]}\n")
+                    f.write(f"     Input IDs: {[item['id'] for item in input_data]}\n")
                 return False
         except Exception as e:
             print(f"  -> Unexpected Error: {e}")
