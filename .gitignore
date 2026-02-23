@@ -5,3 +5,22 @@
 /grader.log
 
 .env
+
+__pycache__/
+
+scrapers/mek_search/mek_calendar_search_results.json
+
+# Agent-specific files
+skills-lock.json
+.claude/
+.agents/
+
+# Sensitive or high-churn files
+.idea/**/dataSources/
+.idea/**/dataSources.ids
+.idea/**/dataSources.local.xml
+.idea/**/sqlDataSources.xml
+.idea/**/DataSources.xml
+.idea/**/dynamic.xml
+.idea/**/uiDesigner.xml
+.idea/**/dbnavigator.xml

@@ -1,0 +1,108 @@
+import json
+import os
+import psycopg2
+from psycopg2.extras import execute_values
+
+INPUT_FILE = 'scrapers/mek_search/mek_calendar_search_results.jsonl'
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+
+def create_calendar_tables(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS calendar_entries (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            link TEXT,
+            snippet TEXT,
+            is_literature BOOLEAN,
+            valid_dates TEXT[],
+            categories TEXT[],
+            ai_rating INTEGER,
+            ai_reason TEXT,
+            ai_checked BOOLEAN DEFAULT FALSE
+        );
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS calendar_votes (
+            id SERIAL PRIMARY KEY,
+            entry_id INTEGER REFERENCES calendar_entries(id),
+            rating INTEGER CHECK (rating >= 0 AND rating <= 5),
+            date_class VARCHAR(20),
+            corrected_date TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_calendar_entries_ai_checked ON calendar_entries(ai_checked)")
+
+
+def insert_batch(cur, batch):
+    query = """
+        INSERT INTO calendar_entries (title, link, snippet, is_literature, valid_dates, categories)
+        VALUES %s
+    """
+    execute_values(cur, query, batch)
+
+
+def seed():
+    if not DATABASE_URL:
+        print("Error: DATABASE_URL environment variable not set.")
+        return
+
+    if not os.path.exists(INPUT_FILE):
+        print(f"Error: {INPUT_FILE} not found.")
+        return
+
+    print("Connecting to Neon...")
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+
+    create_calendar_tables(cur)
+
+    print("Reading calendar entries and batch inserting...")
+    batch_size = 1000
+    batch = []
+    inserted = 0
+
+    with open(INPUT_FILE, 'r', encoding='utf-8') as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+                if data.get('count') == 0:
+                    continue
+                if not data.get('title') or not data.get('snippet'):
+                    continue
+
+                batch.append((
+                    data.get('title', ''),
+                    data.get('link', ''),
+                    data.get('snippet', ''),
+                    bool(data.get('is_literature', False)),
+                    data.get('valid_dates', []),
+                    data.get('topics', [])
+                ))
+
+                if len(batch) >= batch_size:
+                    insert_batch(cur, batch)
+                    inserted += len(batch)
+                    print(f"Inserted {inserted} calendar entries...")
+                    batch = []
+            except Exception as e:
+                print(f"Skip error: {e}")
+
+    if batch:
+        insert_batch(cur, batch)
+        inserted += len(batch)
+        print(f"Inserted final {len(batch)} calendar entries.")
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"Calendar seeding completed. Total inserted: {inserted}")
+
+
+if __name__ == '__main__':
+    seed()
