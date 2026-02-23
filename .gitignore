@@ -9,3 +9,9 @@
 __pycache__/
 
 scrapers/mek_search/mek_calendar_search_results.json
+
+skills-lock.json
+
+.claude/
+
+.agents/
