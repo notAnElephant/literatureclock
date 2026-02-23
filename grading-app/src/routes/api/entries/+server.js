@@ -60,7 +60,6 @@ export async function GET({ url }) {
                     SELECT * FROM calendar_entries
                     WHERE id NOT IN (SELECT entry_id FROM calendar_votes)
                     AND is_literature = true
-                    AND ai_checked = true
                     ORDER BY RANDOM()
                     LIMIT 1
                 `

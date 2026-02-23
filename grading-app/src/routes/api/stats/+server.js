@@ -9,12 +9,10 @@ export async function GET({ url }) {
                 SELECT 
                     (SELECT COUNT(*) FROM calendar_entries e 
                      WHERE is_literature = true 
-                     AND ai_checked = true 
                      AND NOT EXISTS (SELECT 1 FROM calendar_votes v WHERE v.entry_id = e.id AND v.corrected_date = 'AI_DENY')
                     ) as total_entries,
                     (SELECT COUNT(*) FROM calendar_entries e 
                      WHERE is_literature = true 
-                     AND ai_checked = true 
                      AND EXISTS (SELECT 1 FROM calendar_votes v WHERE v.entry_id = e.id AND v.rating > 0 AND v.corrected_date IS NULL)
                      AND NOT EXISTS (SELECT 1 FROM calendar_votes v2 WHERE v2.entry_id = e.id AND v2.corrected_date = 'AI_DENY')
                     ) as voted_entries,

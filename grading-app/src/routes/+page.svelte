@@ -11,11 +11,25 @@
     let hasVotedRating = false;
     let snippetContainer;
     let dataset = 'time'; // 'time' | 'date'
+    let appMode = 'entry'; // 'entry' | 'bookReview'
     
     // Time Correction
     let correctedTime = '';
     let isEditingTime = false;
     let isMetaExpanded = false;
+
+    // Book spam review mode
+    let spamThreshold = 50;
+    let sampleSize = 50;
+    let suspectBooks = [];
+    let suspectBooksLoading = false;
+    let suspectBooksError = null;
+    let currentBookIndex = 0;
+    let booksReviewed = 0;
+    let bookSample = [];
+    let bookSampleLoading = false;
+    let bookSampleError = null;
+    let bookDeleteStats = { books: 0, entries: 0, votes: 0 };
 
     const CLASS_OPTIONS = {
         time: ['am', 'pm', 'ambiguous'],
@@ -43,6 +57,7 @@
     }
 
     async function fetchEntry() {
+        if (appMode !== 'entry') return;
         loading = true;
         entry = null;
         rating = 0;
@@ -73,6 +88,95 @@
             error = e.message;
         } finally {
             loading = false;
+        }
+    }
+
+    async function fetchSuspectBooks() {
+        suspectBooksLoading = true;
+        suspectBooksError = null;
+        suspectBooks = [];
+        currentBookIndex = 0;
+        booksReviewed = 0;
+        bookSample = [];
+        bookSampleError = null;
+        try {
+            const params = new URLSearchParams({
+                dataset,
+                threshold: String(spamThreshold)
+            });
+            const res = await fetch(`/api/book-review/books?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data?.error || 'Failed to load suspect books');
+            suspectBooks = data.books || [];
+            await fetchCurrentBookSample();
+        } catch (e) {
+            suspectBooksError = e.message;
+        } finally {
+            suspectBooksLoading = false;
+        }
+    }
+
+    async function fetchCurrentBookSample() {
+        bookSample = [];
+        bookSampleError = null;
+        const current = suspectBooks[currentBookIndex];
+        if (!current) return;
+        bookSampleLoading = true;
+        try {
+            const params = new URLSearchParams({
+                dataset,
+                title: current.title,
+                limit: String(sampleSize)
+            });
+            const res = await fetch(`/api/book-review/sample?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data?.error || 'Failed to load sample');
+            bookSample = data.sample || [];
+        } catch (e) {
+            bookSampleError = e.message;
+        } finally {
+            bookSampleLoading = false;
+        }
+    }
+
+    function advanceBookReview() {
+        booksReviewed += 1;
+        currentBookIndex += 1;
+        fetchCurrentBookSample();
+    }
+
+    function keepCurrentBook() {
+        if (!currentBook) return;
+        advanceBookReview();
+    }
+
+    async function deleteCurrentBook() {
+        if (!currentBook) return;
+        const confirmed = window.confirm(
+            `Delete all ${currentBook.entry_count} entries for "${currentBook.title}" in ${dataset} dataset?`
+        );
+        if (!confirmed) return;
+
+        bookSampleLoading = true;
+        bookSampleError = null;
+        try {
+            const res = await fetch('/api/book-review/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataset, title: currentBook.title })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data?.error || 'Delete failed');
+            bookDeleteStats = {
+                books: bookDeleteStats.books + 1,
+                entries: bookDeleteStats.entries + (data.deleted_entries || 0),
+                votes: bookDeleteStats.votes + (data.deleted_votes || 0)
+            };
+            advanceBookReview();
+        } catch (e) {
+            bookSampleError = e.message;
+        } finally {
+            bookSampleLoading = false;
         }
     }
 
@@ -149,11 +253,21 @@
         if (requestedDataset === 'date') {
             dataset = 'date';
         }
+        if (params.get('mode') === 'book') {
+            appMode = 'bookReview';
+        }
         fetchStats();
-        fetchEntry();
+        if (appMode === 'bookReview') {
+            fetchSuspectBooks();
+        } else {
+            fetchEntry();
+        }
     });
 
     $: progress = stats.total_entries > 0 ? (stats.voted_entries / stats.total_entries) * 100 : 0;
+    $: bookTotal = suspectBooks.length;
+    $: bookProgress = bookTotal > 0 ? (booksReviewed / bookTotal) * 100 : 0;
+    $: currentBook = suspectBooks[currentBookIndex] || null;
 
     function setDataset(nextDataset) {
         if (nextDataset !== 'time' && nextDataset !== 'date') return;
@@ -161,9 +275,30 @@
         dataset = nextDataset;
         const params = new URLSearchParams(window.location.search);
         params.set('dataset', nextDataset);
+        params.set('mode', appMode === 'bookReview' ? 'book' : 'entry');
         window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-        fetchStats();
-        fetchEntry();
+        if (appMode === 'bookReview') {
+            fetchSuspectBooks();
+        } else {
+            fetchStats();
+            fetchEntry();
+        }
+    }
+
+    function setAppMode(nextMode) {
+        if (nextMode !== 'entry' && nextMode !== 'bookReview') return;
+        if (appMode === nextMode) return;
+        appMode = nextMode;
+        const params = new URLSearchParams(window.location.search);
+        params.set('dataset', dataset);
+        params.set('mode', appMode === 'bookReview' ? 'book' : 'entry');
+        window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+        if (appMode === 'bookReview') {
+            fetchSuspectBooks();
+        } else {
+            fetchStats();
+            fetchEntry();
+        }
     }
 </script>
 
@@ -183,6 +318,20 @@
     <div class="sticky top-0 z-50 w-full max-w-md mb-4 bg-white rounded-xl shadow-md p-4 border-b-2 border-blue-500">
         <div class="grid grid-cols-2 gap-2 mb-3">
             <button
+                class="py-2 text-xs font-bold rounded-lg uppercase border-2 transition-all {appMode === 'entry' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-500'}"
+                on:click={() => setAppMode('entry')}
+            >
+                Entry Grader
+            </button>
+            <button
+                class="py-2 text-xs font-bold rounded-lg uppercase border-2 transition-all {appMode === 'bookReview' ? 'border-amber-600 bg-amber-500 text-white' : 'border-gray-200 bg-white text-gray-500'}"
+                on:click={() => setAppMode('bookReview')}
+            >
+                Book Review
+            </button>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+            <button
                 class="py-2 text-xs font-bold rounded-lg uppercase border-2 transition-all {dataset === 'time' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-500'}"
                 on:click={() => setDataset('time')}
             >
@@ -195,21 +344,137 @@
                 Date Mode
             </button>
         </div>
-        <div class="flex justify-between text-sm font-bold text-gray-700 mb-2">
-            <span>Progress: {stats.voted_entries} / {stats.total_entries}</span>
-            <span>{progress.toFixed(2)}%</span>
-        </div>
-        <div class="w-full bg-gray-200 rounded-full h-3 mb-2">
-            <div class="bg-blue-600 h-3 rounded-full transition-all duration-500" style="width: {progress}%"></div>
-        </div>
-        <div class="flex justify-between items-center text-xs text-gray-500">
-            <span>Avg Rating: <span class="font-bold text-yellow-600">{stats.average_rating.toFixed(1)} ★</span></span>
-            <span class="italic">0 ★ = Denied</span>
-        </div>
+        {#if appMode === 'entry'}
+            <div class="flex justify-between text-sm font-bold text-gray-700 mb-2">
+                <span>Progress: {stats.voted_entries} / {stats.total_entries}</span>
+                <span>{progress.toFixed(2)}%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3 mb-2">
+                <div class="bg-blue-600 h-3 rounded-full transition-all duration-500" style="width: {progress}%"></div>
+            </div>
+            <div class="flex justify-between items-center text-xs text-gray-500">
+                <span>Avg Rating: <span class="font-bold text-yellow-600">{stats.average_rating.toFixed(1)} ★</span></span>
+                <span class="italic">0 ★ = Denied</span>
+            </div>
+        {:else}
+            <div class="flex justify-between text-sm font-bold text-gray-700 mb-2">
+                <span>Books graded: {booksReviewed} / {bookTotal}</span>
+                <span>{bookProgress.toFixed(2)}%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3 mb-2">
+                <div class="bg-amber-500 h-3 rounded-full transition-all duration-500" style="width: {bookProgress}%"></div>
+            </div>
+            <div class="flex justify-between items-center text-xs text-gray-500 gap-2">
+                <span>Threshold: {spamThreshold}+ matches</span>
+                <span>Sample: {sampleSize}</span>
+                <span class="truncate">Deleted: {bookDeleteStats.books} books</span>
+            </div>
+        {/if}
     </div>
 
     <div class="relative w-full max-w-md flex-1 mb-20" style="min-height: 500px;">
-        {#if loading}
+        {#if appMode === 'bookReview'}
+            {#if suspectBooksLoading}
+                <div class="absolute inset-0 flex items-center justify-center bg-white rounded-xl shadow-xl">
+                    <p class="text-gray-500 animate-pulse">Loading suspect books...</p>
+                </div>
+            {:else if suspectBooksError}
+                <div class="absolute inset-0 flex flex-col items-center justify-center bg-white rounded-xl shadow-xl p-6 text-center">
+                    <p class="text-red-500 mb-4 font-bold">{suspectBooksError}</p>
+                    <button on:click={fetchSuspectBooks} class="px-6 py-2 bg-amber-500 text-white rounded-lg shadow">Retry</button>
+                </div>
+            {:else if !currentBook}
+                <div class="absolute inset-0 flex flex-col items-center justify-center bg-white rounded-xl shadow-xl p-6 text-center">
+                    <p class="text-gray-700 mb-2 font-bold">Book review queue complete</p>
+                    <p class="text-xs text-gray-500 mb-4">Only books with more than {spamThreshold} entries are included.</p>
+                    <button on:click={fetchSuspectBooks} class="px-6 py-2 bg-amber-500 text-white rounded-lg shadow">Reload Queue</button>
+                </div>
+            {:else}
+                <div class="absolute inset-0 bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col">
+                    <div class="bg-gray-800 text-white p-4 shrink-0 space-y-2">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-[10px] uppercase tracking-widest text-amber-300 font-bold">Book Spam Review</div>
+                                <div class="font-bold leading-tight text-sm truncate">{currentBook.title}</div>
+                                <div class="text-xs text-gray-300">
+                                    {currentBook.entry_count} matches in {dataset === 'date' ? 'Date' : 'Time'} DB
+                                </div>
+                            </div>
+                            <button
+                                on:click={fetchCurrentBookSample}
+                                class="shrink-0 px-3 py-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-xs font-bold"
+                            >
+                                Resample
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto bg-gray-50/50 p-3 space-y-3">
+                        {#if bookSampleLoading}
+                            <div class="h-full min-h-[240px] flex items-center justify-center">
+                                <p class="text-gray-500 animate-pulse">Loading sample...</p>
+                            </div>
+                        {:else if bookSampleError}
+                            <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                                {bookSampleError}
+                            </div>
+                        {:else if bookSample.length === 0}
+                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+                                No sample rows found for this title.
+                            </div>
+                        {:else}
+                            {#each bookSample as sample}
+                                <div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                                    <div class="flex items-center justify-between gap-2 mb-2 text-[11px] text-gray-500">
+                                        <span class="font-mono">#{sample.id}</span>
+                                        <span class="truncate">{dataset === 'date' ? sample.valid_dates : sample.valid_times}</span>
+                                    </div>
+                                    {#if sample.ai_rating !== null || sample.ai_reason}
+                                        <div class="mb-2 p-2 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-900">
+                                            <span class="font-bold mr-2">AI:</span>
+                                            {#if sample.ai_rating !== null}<span class="font-semibold">{sample.ai_rating}/5</span>{/if}
+                                            {#if sample.ai_reason}<span class="italic ml-1">"{sample.ai_reason}"</span>{/if}
+                                        </div>
+                                    {/if}
+                                    <div class="prose prose-sm max-w-none text-gray-800 leading-relaxed">
+                                        {@html sample.snippet}
+                                    </div>
+                                    <div class="mt-2 flex justify-between items-center gap-2 text-[11px] text-gray-500">
+                                        <span class="truncate">{sample.author || 'Unknown author'}</span>
+                                        {#if sample.link}
+                                            <a href={sample.link} target="_blank" class="text-blue-600 underline shrink-0">Source</a>
+                                        {/if}
+                                    </div>
+                                </div>
+                            {/each}
+                        {/if}
+                    </div>
+
+                    <div class="bg-gray-50 p-3 border-t border-gray-200 shrink-0 space-y-2">
+                        <div class="flex gap-2">
+                            <button
+                                on:click={keepCurrentBook}
+                                disabled={bookSampleLoading || !currentBook}
+                                class="flex-1 py-3 rounded-lg font-bold text-emerald-700 border-2 border-emerald-100 hover:bg-emerald-50 transition-all uppercase text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Keep Book
+                            </button>
+                            <button
+                                on:click={deleteCurrentBook}
+                                disabled={bookSampleLoading || !currentBook}
+                                class="flex-1 py-3 rounded-lg font-bold text-white bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 transition-all shadow-lg uppercase text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Delete All Instances
+                            </button>
+                        </div>
+                        <div class="text-[11px] text-gray-500 flex justify-between">
+                            <span>Book {Math.min(currentBookIndex + 1, bookTotal)} of {bookTotal}</span>
+                            <span>Reviewed this session: {booksReviewed}</span>
+                        </div>
+                    </div>
+                </div>
+            {/if}
+        {:else if loading}
             <div class="absolute inset-0 flex items-center justify-center bg-white rounded-xl shadow-xl">
                 <p class="text-gray-500 animate-pulse">Finding next quote...</p>
             </div>
