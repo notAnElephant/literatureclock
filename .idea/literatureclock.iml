@@ -6,6 +6,9 @@
       <excludeFolder url="file://$MODULE_DIR$/mek_downloads" />
       <excludeFolder url="file://$MODULE_DIR$/dia_downloads" />
       <excludeFolder url="file://$MODULE_DIR$/grading-app/.svelte-kit" />
+      <excludeFolder url="file://$MODULE_DIR$/.agents" />
+      <excludeFolder url="file://$MODULE_DIR$/.claude" />
+      <excludeFolder url="file://$MODULE_DIR$/.idea/dataSources" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (literatureclock)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
