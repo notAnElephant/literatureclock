@@ -296,7 +296,11 @@ class MekSearcher:
             self.driver.get(link)
             tags = self.driver.find_elements(By.CSS_SELECTOR, ".topic, .subtopic")
             topics = [t.text for t in tags]
-            is_lit = any("irodalom" in t.lower() for t in topics)
+            lowered_topics = [t.lower() for t in topics]
+            is_lit = any(
+                ("irodalom" in t) and ("irodalomtudomány" not in t) and ("irodalomtudomany" not in t)
+                for t in lowered_topics
+            )
             return is_lit, topics
         except WebDriverException:
             # Re-raise WebDriverException to trigger driver restart in search()
