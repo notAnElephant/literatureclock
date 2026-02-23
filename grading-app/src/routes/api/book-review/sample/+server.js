@@ -14,14 +14,14 @@ export async function GET({ url }) {
 
         const rows = dataset === 'date'
             ? await sql`
-                SELECT id, title, author, snippet, valid_dates, ai_checked, ai_rating, ai_reason, link
+                SELECT id, title, NULL::text AS author, snippet, valid_dates, ai_checked, ai_rating, ai_reason, link
                 FROM calendar_entries
                 WHERE title = ${title}
                 ORDER BY RANDOM()
                 LIMIT ${limit}
             `
             : await sql`
-                SELECT id, title, author, snippet, valid_times, ai_checked, ai_rating, ai_reason, link
+                SELECT id, title, NULL::text AS author, snippet, valid_times, ai_checked, ai_rating, ai_reason, link
                 FROM entries
                 WHERE title = ${title}
                 ORDER BY RANDOM()
