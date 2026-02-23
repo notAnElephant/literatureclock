@@ -30,6 +30,7 @@
     let bookSampleLoading = false;
     let bookSampleError = null;
     let bookDeleteStats = { books: 0, entries: 0, votes: 0 };
+    let isBookTitleExpanded = false;
 
     const CLASS_OPTIONS = {
         time: ['am', 'pm', 'ambiguous'],
@@ -99,6 +100,7 @@
         booksReviewed = 0;
         bookSample = [];
         bookSampleError = null;
+        isBookTitleExpanded = false;
         try {
             const params = new URLSearchParams({
                 dataset,
@@ -142,6 +144,7 @@
     function advanceBookReview() {
         booksReviewed += 1;
         currentBookIndex += 1;
+        isBookTitleExpanded = false;
         fetchCurrentBookSample();
     }
 
@@ -268,6 +271,7 @@
     $: bookTotal = suspectBooks.length;
     $: bookProgress = bookTotal > 0 ? (booksReviewed / bookTotal) * 100 : 0;
     $: currentBook = suspectBooks[currentBookIndex] || null;
+    $: currentBookLink = (bookSample.find((s) => s?.link) || null)?.link || null;
 
     function setDataset(nextDataset) {
         if (nextDataset !== 'time' && nextDataset !== 'date') return;
@@ -395,17 +399,42 @@
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="text-[10px] uppercase tracking-widest text-amber-300 font-bold">Book Spam Review</div>
-                                <div class="font-bold leading-tight text-sm truncate">{currentBook.title}</div>
+                                <button
+                                    type="button"
+                                    class="w-full text-left font-bold leading-tight text-sm truncate hover:text-amber-200 transition-colors"
+                                    on:click={() => isBookTitleExpanded = !isBookTitleExpanded}
+                                    title="Click to expand full title"
+                                >
+                                    {currentBook.title}
+                                </button>
+                                {#if isBookTitleExpanded}
+                                    <div class="mt-2 p-2 rounded bg-gray-700/70 border border-gray-600 text-xs text-gray-100 break-words">
+                                        {currentBook.title}
+                                    </div>
+                                {/if}
                                 <div class="text-xs text-gray-300">
                                     {currentBook.entry_count} matches in {dataset === 'date' ? 'Date' : 'Time'} DB
                                 </div>
                             </div>
-                            <button
-                                on:click={fetchCurrentBookSample}
-                                class="shrink-0 px-3 py-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-xs font-bold"
-                            >
-                                Resample
-                            </button>
+                            <div class="shrink-0 flex gap-2">
+                                {#if currentBookLink}
+                                    <a
+                                        href={currentBookLink}
+                                        target="_blank"
+                                        class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-xs font-bold"
+                                        title="Open a source page for this book"
+                                    >
+                                        Go to Book
+                                    </a>
+                                {/if}
+                                <button
+                                    on:click={fetchCurrentBookSample}
+                                    class="px-3 py-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-xs font-bold"
+                                    title="Load a new random sample for this title"
+                                >
+                                    Resample
+                                </button>
+                            </div>
                         </div>
                     </div>
 
